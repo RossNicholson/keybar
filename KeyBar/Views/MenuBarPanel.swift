@@ -16,14 +16,14 @@ struct MenuBarPanel: View {
         VStack(spacing: 0) {
             header
             VStack(spacing: 8) {
-                if state.store.records.isEmpty {
+                if state.store.active.isEmpty {
                     MessageCard(title: "No keys yet",
                                 message: "Add an API key once and Claude Code can use it without ever seeing it.",
                                 fill: AppColors.butter, compact: true) {
                         PillButton(title: "Add a key", symbol: "plus") { showingAdd = true }
                     }
                 } else {
-                    if state.store.records.count > Self.visibleRows {
+                    if state.store.active.count > Self.visibleRows {
                         SearchField(text: $search)
                     }
                     keyList
@@ -77,7 +77,7 @@ struct MenuBarPanel: View {
             }
         }
         return Group {
-            if state.store.records.count > Self.visibleRows {
+            if state.store.active.count > Self.visibleRows {
                 ScrollView { rows }
                     .scrollIndicators(.automatic)
                     .frame(height: CGFloat(Self.visibleRows) * Self.rowHeight + 10)
@@ -129,7 +129,7 @@ struct MenuBarPanel: View {
 
     private var footer: some View {
         PanelFooter {
-            let count = state.store.records.count
+            let count = state.store.active.count
             let keys = "\(count) key\(count == 1 ? "" : "s")"
             switch state.claude.status {
             case .connected: Text("\(keys) · Claude Code connected")

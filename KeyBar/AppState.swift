@@ -128,6 +128,20 @@ final class AppState {
         log.log(.deleted, [name])
     }
 
+    /// For a key the Keychain won't delete: off the list, still in the Keychain
+    func forget(_ name: String) {
+        store.forget(name)
+        revealed[name] = nil
+        if selectedKey == name { selectedKey = nil }
+        log.log(.deleted, [name], detail: "Removed from KeyBar; still in the Keychain")
+    }
+
+    func setArchived(_ name: String, _ archived: Bool) {
+        store.setArchived(name, archived)
+        revealed[name] = nil
+        log.log(.changed, [name], detail: archived ? "Archived" : "Restored")
+    }
+
     func rename(_ name: String, to newName: String) throws {
         try store.rename(name, to: newName)
         revealed[name] = nil
@@ -186,6 +200,11 @@ final class AppSettings {
     /// program running as this user could start KeyBar's helper.
     var approvalSeconds: TimeInterval = UserDefaults.standard.object(forKey: "approvalSeconds") as? Double ?? 900 {
         didSet { UserDefaults.standard.set(approvalSeconds, forKey: "approvalSeconds") }
+    }
+
+    /// A dot on the menu bar icon while Claude Code isn't connected
+    var disconnectedDot: Bool = UserDefaults.standard.object(forKey: "disconnectedDot") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(disconnectedDot, forKey: "disconnectedDot") }
     }
 
     static let approvalChoices: [TimeInterval] = [-1, 900, 3600, 0]

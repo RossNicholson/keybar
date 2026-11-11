@@ -13,6 +13,7 @@ enum Demo {
         ("STRIPE_PUBLISHABLE_KEY", "pk_test_demo51H8xYzAbCdEfGhIjKlMnOpQr", "Shop", nil),
         ("RESEND_API_KEY", "re_demo_9sKx2Lm4Np6Qr8Tv0Wx", "Website", "Contact form email"),
         ("OPENAI_API_KEY", "sk-proj-demo-Ab12Cd34Ef56Gh78Ij90", nil, nil),
+        ("HEROKU_API_KEY", "demo-heroku-0f1e2d3c4b5a69788796", nil, "Old host, moved to Cloudflare"),
     ]
 
     static func state() -> AppState {
@@ -29,6 +30,7 @@ enum Demo {
                 store.update(record)
             }
         }
+        store.setArchived("HEROKU_API_KEY", true)
         let log = ActivityLog(url: nil)
         let now = Date()
         log.replace(with: [

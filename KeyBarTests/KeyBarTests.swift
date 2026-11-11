@@ -159,6 +159,54 @@ final class StoreTests: XCTestCase {
         return (SecretStore(vault: vault, indexURL: nil), vault)
     }
 
+    func testArchiveHidesButKeeps() throws {
+        let (store, vault) = makeStore()
+        try store.add(name: "OLD_TOKEN", value: "v1")
+        try store.add(name: "NEW_TOKEN", value: "v2")
+        store.setArchived("OLD_TOKEN", true)
+        XCTAssertEqual(store.active.map(\.name), ["NEW_TOKEN"])
+        XCTAssertEqual(store.search("", archived: true).map(\.name), ["OLD_TOKEN"])
+        XCTAssertEqual(try vault.read("OLD_TOKEN"), "v1")
+        store.setArchived("OLD_TOKEN", false)
+        XCTAssertEqual(store.active.count, 2)
+    }
+
+    func testOrderByHandAndGroups() throws {
+        let (store, _) = makeStore()
+        for name in ["A_KEY", "B_KEY", "C_KEY"] { try store.add(name: name, value: "x", group: "Shop") }
+        store.move("C_KEY", by: -1)
+        XCTAssertEqual(store.active.map(\.name), ["A_KEY", "C_KEY", "B_KEY"])
+        store.move("A_KEY", by: -1)   // already first
+        XCTAssertEqual(store.active.first?.name, "A_KEY")
+        store.renameGroup("Shop", to: "Store")
+        XCTAssertEqual(Set(store.records.compactMap(\.group)), ["Store"])
+        store.setGroup("B_KEY", nil)
+        XCTAssertNil(store.record("B_KEY")?.group)
+        store.renameGroup("Store", to: nil)
+        XCTAssertTrue(store.customGroups.isEmpty)
+    }
+
+    func testForgottenKeysStayOffTheList() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let vault = MemoryVault(["STUCK_KEY": "x", "OK_KEY": "y"])
+        let store = SecretStore(vault: vault, indexURL: url)
+        store.forget("STUCK_KEY")
+        XCTAssertEqual(SecretStore(vault: vault, indexURL: url).records.map(\.name), ["OK_KEY"], "not brought back on load")
+        try store.add(name: "STUCK_KEY", value: "z", replacing: true)
+        XCTAssertEqual(Set(SecretStore(vault: vault, indexURL: url).records.map(\.name)), ["OK_KEY", "STUCK_KEY"])
+    }
+
+    func testOldIndexFilesStillLoad() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let old = #"{"secrets":[{"createdAt":"2026-11-11T22:25:55Z","name":"GH_TOKEN","projectFolders":[],"updatedAt":"2026-11-11T22:25:55Z"}],"version":1}"#
+        try Data(old.utf8).write(to: url)
+        let store = SecretStore(vault: MemoryVault(["GH_TOKEN": "x"]), indexURL: url)
+        XCTAssertNil(store.lastError)
+        XCTAssertEqual(store.records.first?.isArchived, false)
+    }
+
     func testFindsKeysAlreadyInTheVault() {
         let (store, _) = makeStore(["GITHUB_TOKEN": "x", "not valid": "y"])
         XCTAssertEqual(store.records.map(\.name), ["GITHUB_TOKEN"])
@@ -251,6 +299,15 @@ final class PolicyTests: XCTestCase {
         XCTAssertFalse(policy.handle(request(["STRIPE_SECRET_KEY"], "stripe", cwd: "/tmp")).ok)
         XCTAssertTrue(policy.handle(request(["STRIPE_SECRET_KEY"], "stripe", cwd: "/tmp/shop")).ok)
         XCTAssertEqual(log.entries.last?.action, .refused)
+    }
+
+    func testArchivedKeysAreHiddenFromClaude() {
+        store.setArchived("GITHUB_TOKEN", true)
+        let reply = policy.handle(request(["GITHUB_TOKEN"], "gh api user"))
+        XCTAssertFalse(reply.ok)
+        XCTAssertNil(reply.values)
+        XCTAssertTrue(reply.error?.contains("archived") ?? false)
+        XCTAssertFalse(policy.handle(BridgeRequest(action: .list, cwd: "/tmp")).secrets?.contains { $0.name == "GITHUB_TOKEN" } ?? true)
     }
 
     func testFolderLimitsCoverTheProjectToo() {

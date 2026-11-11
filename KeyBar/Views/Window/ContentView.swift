@@ -93,7 +93,7 @@ private struct SidebarRow: View {
     @ViewBuilder private func badge(selected: Bool) -> some View {
         switch section {
         case .keys:
-            Text("\(state.store.records.count)")
+            Text("\(state.store.active.count)")
                 .font(.mono(10, weight: .semibold))
                 .foregroundStyle(selected ? AppColors.onSolid : AppColors.secondaryText)
                 .padding(.trailing, 6)

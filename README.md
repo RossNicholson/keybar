@@ -84,7 +84,11 @@ Other MCP clients can use the same server; the activity log shows them by name.
 - **Knows 468 services.** CLOUDFLARE_API_TOKEN is recognised as Cloudflare's API token, STRIPE_PUBLISHABLE_KEY as Stripe's publishable key. The list is built in, so recognising one never touches the network.
 - **Recognises pasted keys.** Paste `sk-ant-…`, `ghp_…`, `sk_live_…` and dozens more and the name is filled in for you. Paste a whole `NAME=value` line and both fields fill.
 - **Imports .env files.** Pick which lines to bring in, then delete the file.
-- **Groups and notes**, search, and a window for managing it all, in light and dark mode.
+- **Groups, order and notes.** Group keys by project (or leave them under their service), rename or ungroup a group, and put keys in your own order from the right-click menu. Search by name, service, group or note.
+- **Archive.** File away a key you're not using: it stays in the Keychain but Claude can't see or use it until you restore it.
+- **Menu bar dot.** A coral dot on the key while Claude Code isn't connected (you can turn it off).
+- **Delete, even when stuck.** If the Keychain won't delete an item, KeyBar can take it off its list and leave it for Keychain Access.
+- A window for managing it all, in light and dark mode.
 
 <p align="center">
   <img src="docs/window-keys.png" alt="KeyBar's window, listing keys grouped by service and project" width="720">

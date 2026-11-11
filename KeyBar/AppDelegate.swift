@@ -56,6 +56,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     // MARK: - The bridge
 
+    private var statusRefresh: Timer?
+
+    /// The key, with a coral dot when Claude Code isn't connected (unless
+    /// that's turned off in Settings)
+    private func updateStatusIcon() {
+        guard let button = statusItem?.button else { return }
+        let symbol = NSImage(systemSymbolName: "key.horizontal.fill", accessibilityDescription: "KeyBar")
+            ?? NSImage(systemSymbolName: "key.fill", accessibilityDescription: "KeyBar")
+        let showDot = state.settings.disconnectedDot && state.claude.status != .connected
+        guard showDot, let symbol else {
+            symbol?.isTemplate = true
+            button.image = symbol
+            button.toolTip = "KeyBar"
+            return
+        }
+        let size = NSSize(width: symbol.size.width + 4, height: max(symbol.size.height, 16))
+        let image = NSImage(size: size, flipped: false) { rect in
+            // Drawn each time it's shown, so the key matches the menu bar's appearance
+            let keyRect = NSRect(x: 0, y: (rect.height - symbol.size.height) / 2,
+                                 width: symbol.size.width, height: symbol.size.height)
+            symbol.draw(in: keyRect)
+            NSColor.labelColor.set()
+            keyRect.fill(using: .sourceAtop)
+            let dot = NSRect(x: rect.width - 6, y: rect.height - 7, width: 6, height: 6)
+            NSColor(srgbRed: 0.91, green: 0.45, blue: 0.38, alpha: 1).setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            return true
+        }
+        image.isTemplate = false
+        image.accessibilityDescription = "KeyBar, Claude Code not connected"
+        button.image = image
+        button.toolTip = "KeyBar · Claude Code isn't connected"
+    }
+
     private func startBridge() {
         let policy = BridgePolicy(store: state.store, log: state.log, settings: state.settings)
         self.policy = policy
@@ -91,12 +125,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func setUpStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        let icon = NSImage(systemSymbolName: "key.horizontal.fill", accessibilityDescription: "KeyBar")
-            ?? NSImage(systemSymbolName: "key.fill", accessibilityDescription: "KeyBar")
-        icon?.isTemplate = true
-        item.button?.image = icon
-        item.button?.toolTip = "KeyBar"
         statusItem = item
+        updateStatusIcon()
 
         let panel = MenuBarPanelController(statusItem: item)
         self.panel = panel
@@ -112,16 +142,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         observePanelSize()
     }
 
-    /// The panel fits its content; refit when the keys or the connection change
+    /// The panel fits its content; refit when the keys or the connection
+    /// change, and update the menu bar icon's dot
     private func observePanelSize() {
         withObservationTracking {
-            _ = state.store.records.count
+            _ = state.store.active.count
             _ = state.claude.status
+            _ = state.settings.disconnectedDot
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 self?.panel?.fitToContent()
+                self?.updateStatusIcon()
                 self?.observePanelSize()
             }
+        }
+        // Claude Code can be changed from the terminal too
+        guard statusRefresh == nil else { return }
+        statusRefresh = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.state.claude.refresh() }
         }
     }
 

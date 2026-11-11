@@ -42,6 +42,10 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
   Claude's uses (on by default, 15 min, scoped to client + project + keys, prompt shows the command),
   client names in the log, redaction of reversed and embedded-base64 copies, 468 services, key-shape
   name suggestions, built-in (no network) service tiles.
+- Feature parity checked against claudekeychain.app (site, llms-full.txt, changelog to 1.17) on
+  2026-11-11: archive (Active/Archived), hand ordering, group rename/ungroup/move, force delete
+  (`forget`), menu bar dot added. Deliberately left out: themes/accent/icon colours (HouseStyle look),
+  favicon fetching (built-in tiles, no network), feedback nag (no promo).
 - Independent security review done 2026-11-11; all 11 findings fixed: folder limits also checked
   against the helper's launch folder (`projectFolder`), helper verifies the app's signature
   (`CodeIdentity`) and keeps only the keys it asked for, Touch ID prompts time out (170 s) one at a time,

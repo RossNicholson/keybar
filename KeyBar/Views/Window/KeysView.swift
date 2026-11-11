@@ -9,6 +9,7 @@ struct KeysView: View {
     @State private var editing: SecretRecord?
     @State private var importing: ImportRequest?
     @State private var importError: String?
+    @State private var showArchived = false
 
     var body: some View {
         Screen {
@@ -21,7 +22,7 @@ struct KeysView: View {
             if let importError { SettingNote(importError) }
             if let error = state.store.lastError { SettingNote(error) }
 
-            if state.store.records.isEmpty {
+            if state.store.active.isEmpty && state.store.archived.isEmpty {
                 MessageCard(title: "No keys yet",
                             message: "Add your API keys once: Claude, Cloudflare, GitHub, anything. They go in your Mac's Keychain, and Claude Code can use them by name without ever seeing them. Got a .env file? Import it.",
                             fill: AppColors.butter) {
@@ -29,20 +30,36 @@ struct KeysView: View {
                     GhostButton(title: "Import .env", symbol: "square.and.arrow.down") { chooseEnvFile() }
                 }
             } else {
-                SearchField(text: $search, placeholder: "Search by name, service, group or note")
-                    .frame(maxWidth: 360)
-                let records = state.store.search(search)
+                HStack(spacing: 12) {
+                    SearchField(text: $search, placeholder: "Search by name, service, group or note")
+                        .frame(maxWidth: 360)
+                    if !state.store.archived.isEmpty || showArchived {
+                        PillPicker(selection: $showArchived, options: [false, true], track: AppColors.ground) {
+                            $0 ? "Archived \(state.store.archived.count)" : "Active \(state.store.active.count)"
+                        }
+                        .frame(width: 260)
+                    }
+                }
+                let records = state.store.search(search, archived: showArchived)
                 let groups = Dictionary(grouping: records, by: \.displayGroup)
+                let custom = Set(state.store.customGroups)
                 ForEach(groups.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }, id: \.self) { group in
                     VStack(alignment: .leading, spacing: 8) {
                         SectionLabel(text: group)
+                            .contextMenu {
+                                if custom.contains(group) {
+                                    Button("Rename Group…") { renameGroup(group) }
+                                    Button("Ungroup") { state.store.renameGroup(group, to: nil) }
+                                }
+                            }
                         ForEach(groups[group] ?? []) { record in
                             KeyRow(record: record) { editing = record }
                         }
                     }
                 }
                 if records.isEmpty {
-                    Text("No keys match \"\(search)\".")
+                    Text(search.isEmpty ? (showArchived ? "Nothing archived." : "Every key is archived.")
+                                        : "No keys match \"\(search)\".")
                         .font(.mono(11))
                         .foregroundStyle(AppColors.secondaryText)
                 }
@@ -58,6 +75,23 @@ struct KeysView: View {
         .sheet(item: $importing) { request in
             ImportView(request: request) { importing = nil }.environment(state)
         }
+    }
+
+    /// Asks for a group's new name
+    private func renameGroup(_ group: String) {
+        let alert = NSAlert()
+        alert.messageText = "Rename \"\(group)\""
+        alert.informativeText = "Every key in the group moves to the new name."
+        let field = NSTextField(string: group)
+        field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, name != group else { return }
+        state.store.renameGroup(group, to: name)
     }
 
     private var subtitle: String {
@@ -132,10 +166,25 @@ struct KeyRow: View {
         .padding(.vertical, 11)
         .card(hovered: hovered, radius: Radius.row)
         .onHover { hovered = $0 }
+        .opacity(record.isArchived ? 0.7 : 1)
         .contextMenu {
             Button("Copy Name") { Clipboard.copyText(record.name) }
             Button("Copy as $\(record.name)") { Clipboard.copyText("$\(record.name)") }
             Button("Edit…", action: edit)
+            Divider()
+            Button("Move Up") { state.store.move(record.name, by: -1) }
+            Button("Move Down") { state.store.move(record.name, by: 1) }
+            Menu("Move to Group") {
+                Button(record.service.map { "Under \($0.name)" } ?? "No Group") { state.store.setGroup(record.name, nil) }
+                    .disabled(record.group == nil)
+                let groups = state.store.customGroups.filter { $0 != record.group }
+                if !groups.isEmpty { Divider() }
+                ForEach(groups, id: \.self) { group in
+                    Button(group) { state.store.setGroup(record.name, group) }
+                }
+            }
+            Divider()
+            Button(record.isArchived ? "Restore" : "Archive") { state.setArchived(record.name, !record.isArchived) }
         }
     }
 }
@@ -153,6 +202,8 @@ struct KeyEditor: View {
     @State private var note = ""
     @State private var folders: [String] = []
     @State private var error: String?
+    /// The Keychain refused to delete it; offer to take it off the list instead
+    @State private var deleteFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -212,6 +263,17 @@ struct KeyEditor: View {
             .foregroundStyle(AppColors.secondaryText)
 
             if let error { SettingNote(error) }
+            if deleteFailed {
+                HStack(spacing: 10) {
+                    Text("Take it off KeyBar's list anyway? It stays in the Keychain, where Keychain Access can delete it.")
+                        .font(.mono(10))
+                        .foregroundStyle(AppColors.secondaryText)
+                    ConfirmButton(title: "Remove from KeyBar", confirmTitle: "Remove it?") {
+                        state.forget(record.name)
+                        done()
+                    }
+                }
+            }
 
             HStack {
                 ConfirmButton(title: "Delete", confirmTitle: "Delete for good?") {
@@ -220,8 +282,15 @@ struct KeyEditor: View {
                         done()
                     } catch {
                         self.error = error.localizedDescription
+                        deleteFailed = true
                     }
                 }
+                GhostButton(title: record.isArchived ? "Restore" : "Archive",
+                            symbol: record.isArchived ? "tray.and.arrow.up" : "archivebox") {
+                    state.setArchived(record.name, !record.isArchived)
+                    done()
+                }
+                .help(record.isArchived ? "Bring it back into use" : "Keep it, but hide it and stop commands using it")
                 Spacer()
                 GhostButton(title: "Cancel", action: done)
                 PillButton(title: "Save", symbol: "checkmark", action: save)

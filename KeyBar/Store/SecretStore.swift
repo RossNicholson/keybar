@@ -13,8 +13,13 @@ struct SecretRecord: Codable, Identifiable, Hashable, Sendable {
     var createdAt: Date
     var updatedAt: Date
     var lastUsedAt: Date?
+    /// Filed away: kept in the Keychain, but hidden and not usable by commands
+    var archivedAt: Date?
+    /// Where it goes in its group when ordered by hand; unordered keys follow, by name
+    var position: Int?
 
     var id: String { name }
+    var isArchived: Bool { archivedAt != nil }
     var service: Service? { ServiceCatalog.match(name) }
     var kind: String { CredentialKind.of(name) }
     var displayGroup: String { group?.nonEmpty ?? service?.name ?? "Other" }
@@ -36,6 +41,7 @@ enum StoreError: LocalizedError {
     case duplicate(String)
     case missing(String)
     case emptyValue
+    case archived(String)
 
     var errorDescription: String? {
         switch self {
@@ -44,6 +50,7 @@ enum StoreError: LocalizedError {
         case .duplicate(let name): return "There's already a key called \(name)."
         case .missing(let name): return "There's no key called \(name)."
         case .emptyValue: return "The key is empty."
+        case .archived(let name): return "\(name) is archived. Restore it first."
         }
     }
 }
@@ -96,14 +103,28 @@ final class SecretStore {
         Array(Set(records.compactMap { $0.group?.nonEmpty })).sorted()
     }
 
+    /// Hand-ordered keys first, in their order, then the rest by name
     var sorted: [SecretRecord] {
-        records.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        records.sorted { a, b in
+            switch (a.position, b.position) {
+            case let (x?, y?) where x != y: return x < y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+            }
+        }
     }
 
-    func search(_ text: String) -> [SecretRecord] {
+    /// The keys in use: everything but the archived ones
+    var active: [SecretRecord] { sorted.filter { !$0.isArchived } }
+    var archived: [SecretRecord] { sorted.filter(\.isArchived) }
+
+    /// The active keys (or the archived ones) matching `text`
+    func search(_ text: String, archived: Bool = false) -> [SecretRecord] {
+        let base = archived ? self.archived : active
         let query = text.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return sorted }
-        return sorted.filter {
+        guard !query.isEmpty else { return base }
+        return base.filter {
             $0.name.localizedCaseInsensitiveContains(query)
                 || ($0.service?.name.localizedCaseInsensitiveContains(query) ?? false)
                 || ($0.group?.localizedCaseInsensitiveContains(query) ?? false)
@@ -120,6 +141,7 @@ final class SecretStore {
         let existing = record(name)
         if existing != nil && !replacing { throw StoreError.duplicate(name) }
         try vault.write(name, value: value)
+        forgotten.remove(name)
         let now = Date()
         if var existing {
             existing.updatedAt = now
@@ -173,12 +195,63 @@ final class SecretStore {
         save()
     }
 
+    /// Takes a key off KeyBar's list when the Keychain won't delete it. The
+    /// item stays in the Keychain (Keychain Access can remove it) and isn't
+    /// brought back onto the list.
+    func forget(_ name: String) {
+        records.removeAll { $0.name == name }
+        forgotten.insert(name)
+        save()
+    }
+
+    func setArchived(_ name: String, _ archived: Bool) {
+        guard var record = record(name), record.isArchived != archived else { return }
+        record.archivedAt = archived ? Date() : nil
+        replace(record)
+        save()
+    }
+
+    /// Moves a key up (-1) or down (+1) among the keys shown with it
+    func move(_ name: String, by offset: Int) {
+        guard let record = record(name) else { return }
+        var siblings = sorted.filter { $0.displayGroup == record.displayGroup && $0.isArchived == record.isArchived }
+        guard let index = siblings.firstIndex(where: { $0.name == name }) else { return }
+        let target = index + offset
+        guard siblings.indices.contains(target) else { return }
+        siblings.swapAt(index, target)
+        for (position, var sibling) in siblings.enumerated() {
+            sibling.position = position
+            replace(sibling)
+        }
+        save()
+    }
+
+    /// Puts a key in a group (nil: back under its service)
+    func setGroup(_ name: String, _ group: String?) {
+        guard var record = record(name) else { return }
+        record.group = group?.nonEmpty
+        record.position = nil
+        replace(record)
+        save()
+    }
+
+    /// Renames a group you made, or (to nil) ungroups its keys
+    func renameGroup(_ group: String, to newName: String?) {
+        for var record in records where record.group == group {
+            record.group = newName?.nonEmpty
+            if newName?.nonEmpty == nil { record.position = nil }
+            replace(record)
+        }
+        save()
+    }
+
     /// Removes every key from the Keychain and the index
     func deleteEverything() throws {
         for name in Set(records.map(\.name) + ((try? vault.names()) ?? [])) {
             try vault.delete(name)
         }
         records = []
+        forgotten = []
         save()
     }
 
@@ -205,7 +278,12 @@ final class SecretStore {
     private struct Index: Codable {
         var version = 1
         var secrets: [SecretRecord]
+        /// Names taken off the list with `forget` while still in the Keychain
+        var forgotten: [String]?
     }
+
+    /// See `forget`
+    private var forgotten: Set<String> = []
 
     private func load() {
         var loaded: [SecretRecord] = []
@@ -214,6 +292,7 @@ final class SecretStore {
             decoder.dateDecodingStrategy = .iso8601
             if let index = try? decoder.decode(Index.self, from: data) {
                 loaded = index.secrets
+                forgotten = Set(index.forgotten ?? [])
             } else {
                 lastError = "KeyBar couldn't read its list of keys (\(indexURL.path)). The keys themselves are safe in the Keychain."
             }
@@ -222,9 +301,11 @@ final class SecretStore {
         do {
             let stored = Set(try vault.names())
             loaded.removeAll { !stored.contains($0.name) }
+            // Forgotten items deleted since don't need remembering
+            forgotten.formIntersection(stored)
             let known = Set(loaded.map(\.name))
             let now = Date()
-            for name in stored.subtracting(known) where SecretName.isValid(name) {
+            for name in stored.subtracting(known).subtracting(forgotten) where SecretName.isValid(name) {
                 loaded.append(SecretRecord(name: name, createdAt: now, updatedAt: now))
             }
         } catch {
@@ -240,7 +321,7 @@ final class SecretStore {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         do {
-            let data = try encoder.encode(Index(secrets: sorted))
+            let data = try encoder.encode(Index(secrets: sorted, forgotten: forgotten.isEmpty ? nil : forgotten.sorted()))
             try Storage.writePrivate(data, to: indexURL)
         } catch {
             lastError = "Couldn't save the list of keys: \(error.localizedDescription)"

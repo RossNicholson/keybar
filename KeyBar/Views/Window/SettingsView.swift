@@ -32,6 +32,9 @@ struct SettingsView: View {
             SectionLabel(text: "App")
             SettingToggle(title: "Show in the Dock", detail: "Off, KeyBar lives in the menu bar and only shows in the Dock while this window is open.",
                           isOn: $settings.showInDock)
+            SettingToggle(title: "Dot when Claude Code is off",
+                          detail: "A coral dot on the menu bar key while Claude Code isn't connected to KeyBar.",
+                          isOn: $settings.disconnectedDot)
             SettingToggle(title: "Open at login", detail: "Start KeyBar quietly in the menu bar when you log in. Claude Code also starts it when it needs a key.",
                           isOn: Binding(get: { settings.openAtLogin }, set: { settings.setOpenAtLogin($0) })) {
                 if let error = settings.loginError { SettingNote(error) }

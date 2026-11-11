@@ -135,7 +135,8 @@ final class BridgePolicy {
     }
 
     private func list(_ request: BridgeRequest) -> BridgeReply {
-        let secrets = store.sorted.map { record in
+        // Archived keys are filed away: Claude doesn't see them
+        let secrets = store.active.map { record in
             SecretSummary(name: record.name, service: record.service?.name, kind: record.kind,
                           group: record.group, note: record.note, restricted: record.isRestricted,
                           availableHere: isAvailable(record, for: request))
@@ -200,9 +201,14 @@ final class BridgePolicy {
         guard !names.isEmpty else { return Problem(message: "Name at least one key.") }
         let missing = names.filter { store.record($0) == nil }
         if !missing.isEmpty {
-            let stored = store.sorted.map(\.name).joined(separator: ", ")
+            let stored = store.active.map(\.name).joined(separator: ", ")
             return Problem(message: "KeyBar has no key called \(missing.joined(separator: ", ")). "
                 + (stored.isEmpty ? "No keys are stored yet." : "Stored keys: \(stored)."))
+        }
+        let archived = names.filter { store.record($0)?.isArchived == true }
+        if !archived.isEmpty {
+            return Problem(message: "\(archived.joined(separator: ", ")) \(archived.count == 1 ? "is" : "are") archived in KeyBar. "
+                + "Ask the user to restore \(archived.count == 1 ? "it" : "them") if needed.")
         }
         for name in names {
             guard let record = store.record(name), isAvailable(record, for: request) else {
