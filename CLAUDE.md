@@ -59,8 +59,13 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
 - For end-to-end runs use `-demo YES` (in-memory keys): keys added with `security add-generic-password`
   trigger a Keychain dialog when the app reads them. Turn approval off for scripted runs with
   `defaults write com.rossnicholson.KeyBar approvalSeconds -float 0` and delete it afterwards.
-- Not yet verified on screen (Mac was locked): panel and window clicks, add-key typing, the Touch ID
-  prompts themselves, Connect against real Claude Code.
+- Verified on screen 2026-11-11 with Ross (signed dev build, `-demo YES`): window, Active/Archived,
+  right-click menu (archive/restore), menu bar dot, panel, add key from the panel (name suggested from
+  a pasted token), Activity log, Touch ID reveal (Ross approved), Touch ID approval of a Claude use
+  showing the command (Ross approved; repeat within 15 min went through without asking). Demo runs now
+  ask for Touch ID like the real app; only tests skip it.
+- Still to check after the first release: Connect against Ross's real Claude Code from the installed
+  app (it was only checked in a temp HOME, to keep build paths out of his config).
 - Before the first release: Ross adds the six CI secrets to the repo, copies docs/keybar.rb into the tap,
   runs `make release VERSION=1.0.0`; then add KeyBar to HouseStyle's More apps and the website (no site
   page until it's released).

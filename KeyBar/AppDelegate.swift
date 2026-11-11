@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let demo = false
         #endif
         state = testing || demo ? Demo.state() : AppState.live()
+        // A demo run asks for Touch ID like the real thing; only tests skip it
+        if demo && !testing { state.isDemo = false }
         state.openWindow = { [weak self] section in self?.show(section) }
         state.settings.onChange = { [weak self] in self?.applyDockSetting() }
         guard !testing else { return }
