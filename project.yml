@@ -28,7 +28,7 @@ targets:
     dependencies:
       - package: HouseStyle
       # The MCP server Claude Code runs. It lives in Contents/Helpers.
-      - target: keybar
+      - target: KeyBarHelper
         embed: true
         codeSign: true
         copy:
@@ -62,7 +62,7 @@ targets:
 
   # The `keybar` command: the MCP server that Claude Code starts. It asks the
   # running app for a key, runs the command with it and hides it in the output.
-  keybar:
+  KeyBarHelper:
     type: tool
     platform: macOS
     sources:
@@ -71,6 +71,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: keybar
+        PRODUCT_MODULE_NAME: KeyBarHelper
         PRODUCT_BUNDLE_IDENTIFIER: com.rossnicholson.KeyBar.helper
         # Gives the tool an identity in its signature, which the app checks
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES

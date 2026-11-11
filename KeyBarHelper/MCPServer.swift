@@ -80,7 +80,7 @@ final class MCPServer {
 
     // MARK: - Tools
 
-    static let tools: [[String: Any]] = [
+    nonisolated(unsafe) static let tools: [[String: Any]] = [
         [
             "name": "list_secrets",
             "title": "List stored keys",
