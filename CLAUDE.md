@@ -39,13 +39,24 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
 
 ## Where we left off (2026-11-11)
 - v0.1.0 in the repo, not released. All features of Claude Keychain plus: Touch ID approval for
-  Claude's uses (Settings), client names in the log, reversed-copy redaction, 468 services, key-shape
+  Claude's uses (on by default, 15 min, scoped to client + project + keys, prompt shows the command),
+  client names in the log, redaction of reversed and embedded-base64 copies, 468 services, key-shape
   name suggestions, built-in (no network) service tiles.
-- Verified: 31 unit tests; MCP end to end against the running app (list, run, redaction, literal
-  refusal, unknown key); unsigned/re-signed callers refused; Release archive signs the helper correctly
-  (universal, hardened runtime, deep strict verify); `claude mcp add` arguments checked in a temp HOME.
-- Not yet verified on screen (Mac was locked): panel and window clicks, add-key popover typing in the
-  panel, Touch ID prompts (reveal, copy, approval), Connect against real Claude Code.
+- Independent security review done 2026-11-11; all 11 findings fixed: folder limits also checked
+  against the helper's launch folder (`projectFolder`), helper verifies the app's signature
+  (`CodeIdentity`) and keeps only the keys it asked for, Touch ID prompts time out (170 s) one at a time,
+  literal-value refusals don't name the key or log the command, Claude config files never overwritten
+  when unreadable (symlinks/permissions kept), process-group kill on timeout, MCP cancellation,
+  translocated copies refuse to connect, pasted-value check reads the Keychain without UI.
+- Verified: 36 tests (4 skip without env vars); end to end against the signed app in `-demo YES`
+  (list, redaction incl. Basic auth, literal refusal, unknown key, timeout with no leftovers,
+  cancel + ping while running, re-signed helper refused, impostor socket server refused); Release
+  archive signs the helper correctly.
+- For end-to-end runs use `-demo YES` (in-memory keys): keys added with `security add-generic-password`
+  trigger a Keychain dialog when the app reads them. Turn approval off for scripted runs with
+  `defaults write com.rossnicholson.KeyBar approvalSeconds -float 0` and delete it afterwards.
+- Not yet verified on screen (Mac was locked): panel and window clicks, add-key typing, the Touch ID
+  prompts themselves, Connect against real Claude Code.
 - Before the first release: Ross adds the six CI secrets to the repo, copies docs/keybar.rb into the tap,
   runs `make release VERSION=1.0.0`; then add KeyBar to HouseStyle's More apps and the website (no site
   page until it's released).

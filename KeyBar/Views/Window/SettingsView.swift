@@ -22,7 +22,7 @@ struct SettingsView: View {
             })
 
             SettingCard(title: "Ask before Claude uses a key",
-                        detail: "Touch ID before Claude Code (or any app using KeyBar's MCP server) runs a command with one of your keys. With a time, one yes covers every use until it's up.",
+                        detail: "Touch ID before Claude Code (or any app using KeyBar's MCP server) runs a command with one of your keys. The prompt shows the command. With a time, one yes covers the same keys from the same project until it's up.",
                         below: {
                 PillPicker(selection: $settings.approvalSeconds, options: AppSettings.approvalChoices, track: AppColors.ground) {
                     AppSettings.approvalLabel($0)

@@ -17,7 +17,7 @@ final class BridgeServer: @unchecked Sendable {
     init(path: String = Bridge.socketPath, handler: @escaping Handler) {
         self.path = path
         self.handler = handler
-        requirement = Self.helperRequirement()
+        requirement = CodeIdentity.requirement(identifier: Bridge.helperIdentifier)
     }
 
     func start() throws {
@@ -61,11 +61,14 @@ final class BridgeServer: @unchecked Sendable {
     private func serve(_ client: Int32) {
         defer { close(client) }
         BridgeSocket.setTimeout(client, Bridge.replyTimeout)
+        // Read the request even from a caller that'll be turned away, so it
+        // gets the reason rather than a broken connection. It's only used
+        // once the caller checks out.
+        let line = try? BridgeSocket.readLine(client)
         let reply: BridgeReply
         if !callerIsHelper(client) {
             reply = .failure("KeyBar only answers its own signed helper.")
-        } else if let line = try? BridgeSocket.readLine(client),
-                  let request = try? JSONDecoder().decode(BridgeRequest.self, from: line) {
+        } else if let line, let request = try? JSONDecoder().decode(BridgeRequest.self, from: line) {
             reply = handler(request)
         } else {
             reply = .failure("KeyBar couldn't read the request.")
@@ -78,45 +81,7 @@ final class BridgeServer: @unchecked Sendable {
     // MARK: - Who's calling
 
     private func callerIsHelper(_ client: Int32) -> Bool {
-        var token = audit_token_t()
-        var length = socklen_t(MemoryLayout<audit_token_t>.size)
-        guard getsockopt(client, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &length) == 0 else { return false }
-
-        // The socket is private to this user; also make sure it's the same user
-        var uid: uid_t = 0
-        var gid: gid_t = 0
-        guard getpeereid(client, &uid, &gid) == 0, uid == getuid() else { return false }
-
-        guard let requirement else {
-            // An unsigned development build can't check signatures
-            #if DEBUG
-            return true
-            #else
-            return false
-            #endif
-        }
-        let tokenData = Data(bytes: &token, count: MemoryLayout<audit_token_t>.size)
-        var code: SecCode?
-        let attributes = [kSecGuestAttributeAudit: tokenData] as CFDictionary
-        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess, let code else { return false }
-        return SecCodeCheckValidity(code, [], requirement) == errSecSuccess
-    }
-
-    /// "Signed by Apple's CA for this app's team, as KeyBar's helper". Nil if
-    /// this copy of the app isn't signed with a team (a local test build).
-    private static func helperRequirement() -> SecRequirement? {
-        var selfCode: SecCode?
-        guard SecCodeCopySelf([], &selfCode) == errSecSuccess, let selfCode else { return nil }
-        var staticCode: SecStaticCode?
-        guard SecCodeCopyStaticCode(selfCode, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
-        var info: CFDictionary?
-        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-              let info = info as? [String: Any],
-              let team = info[kSecCodeInfoTeamIdentifier as String] as? String else { return nil }
-        let text = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and identifier \"\(Bridge.helperIdentifier)\""
-        var requirement: SecRequirement?
-        guard SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess else { return nil }
-        return requirement
+        CodeIdentity.peer(client, meets: requirement)
     }
 }
 
@@ -128,8 +93,9 @@ final class BridgePolicy {
     private let settings: AppSettings?
     /// Runs waiting for their "finished" report: run ID → log entry
     private var running: [String: String] = [:]
-    /// When the user last approved a use with Touch ID
-    private var lastApproval: Date?
+    /// When the user last approved each kind of use with Touch ID, keyed by
+    /// `approvalScope`
+    private var approvals: [String: Date] = [:]
 
     /// Values shorter than this aren't looked for in commands: too likely to match by chance
     static let literalCheckLength = 8
@@ -152,41 +118,65 @@ final class BridgePolicy {
         request.client == "Claude Code" ? .claudeCode : .other
     }
 
-    private func entry(_ action: ActivityEntry.Action, _ request: BridgeRequest, detail: String?) -> ActivityEntry {
+    /// `showCommand` is false when the command has a key's value in it, so
+    /// the value doesn't end up in the log
+    private func entry(_ action: ActivityEntry.Action, _ request: BridgeRequest, detail: String?,
+                       showCommand: Bool = true) -> ActivityEntry {
         let source = source(request)
         return ActivityEntry(action: action, source: source, names: (request.names ?? []).sorted(),
-                             program: SecretName.program(in: request.command ?? ""), folder: request.cwd,
-                             detail: detail, client: source == .other ? request.client : nil)
+                             program: showCommand ? SecretName.program(in: request.command ?? "") : "a command",
+                             folder: request.cwd, detail: detail, client: source == .other ? request.client : nil)
+    }
+
+    /// Whether a key may be used for this request: in both the folder the
+    /// command runs in and the project Claude Code was started in
+    private func isAvailable(_ record: SecretRecord, for request: BridgeRequest) -> Bool {
+        record.isAvailable(in: request.cwd) && (request.projectFolder.map { record.isAvailable(in: $0) } ?? true)
     }
 
     private func list(_ request: BridgeRequest) -> BridgeReply {
         let secrets = store.sorted.map { record in
             SecretSummary(name: record.name, service: record.service?.name, kind: record.kind,
                           group: record.group, note: record.note, restricted: record.isRestricted,
-                          availableHere: record.isAvailable(in: request.cwd))
+                          availableHere: isAvailable(record, for: request))
         }
         return BridgeReply(ok: true, secrets: secrets)
     }
 
     // MARK: - Approval
 
+    /// The longest command shown in a Touch ID prompt
+    static let promptCommandLength = 160
+
     /// What to ask with Touch ID before this request may go ahead, or nil if
     /// it needn't ask (it's not a use, it'll be refused anyway, approval is
-    /// off, or the user approved one recently enough)
+    /// off, or the user approved the same use recently enough)
     func approvalPrompt(for request: BridgeRequest) -> String? {
         guard request.action == .resolve, let settings, settings.approvalSeconds != 0,
               problem(with: request) == nil else { return nil }
-        if settings.approvalSeconds > 0, let lastApproval,
-           Date().timeIntervalSince(lastApproval) < settings.approvalSeconds {
+        if settings.approvalSeconds > 0, let approved = approvals[Self.approvalScope(request)],
+           Date().timeIntervalSince(approved) < settings.approvalSeconds {
             return nil
         }
         let names = (request.names ?? []).sorted().joined(separator: ", ")
-        let program = SecretName.program(in: request.command ?? "")
-        return "let \(request.client) use \(names) to run \(program)"
+        // The whole command, not just its program: `wrangler --version; curl …`
+        // mustn't pass as "run wrangler"
+        var command = (request.command ?? "").split(whereSeparator: \.isNewline).joined(separator: " ⏎ ")
+        if command.count > Self.promptCommandLength {
+            command = String(command.prefix(Self.promptCommandLength)) + "…"
+        }
+        return "let \(request.client) use \(names) in \(Self.tidy(request.projectFolder ?? request.cwd)) to run: \(command)"
     }
 
-    func approved() {
-        lastApproval = Date()
+    /// One approval covers the same client using the same keys from the same
+    /// project, not every key for everyone
+    private static func approvalScope(_ request: BridgeRequest) -> String {
+        [request.client, request.projectFolder ?? request.cwd, (request.names ?? []).sorted().joined(separator: ",")]
+            .joined(separator: "\u{1F}")
+    }
+
+    func approved(_ request: BridgeRequest) {
+        approvals[Self.approvalScope(request)] = Date()
     }
 
     func declined(_ request: BridgeRequest) -> BridgeReply {
@@ -197,29 +187,38 @@ final class BridgePolicy {
 
     // MARK: - Using keys
 
+    private struct Problem {
+        var message: String
+        /// The command has a key's value in it
+        var containsValue = false
+    }
+
     /// Why a request can't have its keys, or nil if it can
-    private func problem(with request: BridgeRequest) -> String? {
+    private func problem(with request: BridgeRequest) -> Problem? {
         let names = request.names ?? []
         let command = request.command ?? ""
-        guard !names.isEmpty else { return "Name at least one key." }
+        guard !names.isEmpty else { return Problem(message: "Name at least one key.") }
         let missing = names.filter { store.record($0) == nil }
         if !missing.isEmpty {
             let stored = store.sorted.map(\.name).joined(separator: ", ")
-            return "KeyBar has no key called \(missing.joined(separator: ", ")). "
-                + (stored.isEmpty ? "No keys are stored yet." : "Stored keys: \(stored).")
+            return Problem(message: "KeyBar has no key called \(missing.joined(separator: ", ")). "
+                + (stored.isEmpty ? "No keys are stored yet." : "Stored keys: \(stored)."))
         }
         for name in names {
-            guard let record = store.record(name), record.isAvailable(in: request.cwd) else {
+            guard let record = store.record(name), isAvailable(record, for: request) else {
                 let folders = store.record(name)?.projectFolders.map(Self.tidy).joined(separator: ", ") ?? "some folders"
-                return "\(name) can only be used in \(folders), not in \(Self.tidy(request.cwd))."
+                let here = Self.tidy(request.projectFolder ?? request.cwd)
+                return Problem(message: "\(name) can only be used in \(folders), not in \(here).")
             }
         }
         // A command with a key's value written into it would leave the value in
-        // Claude's transcript; it should use $NAME instead
-        for record in store.records {
-            guard let value = try? store.value(record.name), value.count >= Self.literalCheckLength else { continue }
+        // Claude's transcript; it should use $NAME instead. Which key it was
+        // isn't said, so this can't be used to test guesses against key names.
+        // Read quietly: a key macOS would ask about mustn't hold up every use
+        for value in store.allValues() where value.count >= Self.literalCheckLength {
             if command.contains(value) {
-                return "The command contains the value of \(record.name). Use \"$\(record.name)\" and pass its name in secretNames instead."
+                return Problem(message: "The command has the value of a stored key written into it. Refer to keys as "
+                    + "\"$NAME\" and list them in secretNames instead.", containsValue: true)
             }
         }
         return nil
@@ -228,8 +227,8 @@ final class BridgePolicy {
     private func resolve(_ request: BridgeRequest) -> BridgeReply {
         let names = request.names ?? []
         if let problem = problem(with: request) {
-            log.add(entry(.refused, request, detail: problem))
-            return .failure(problem)
+            log.add(entry(.refused, request, detail: problem.message, showCommand: !problem.containsValue))
+            return .failure(problem.message)
         }
         var values: [String: String] = [:]
         for name in names {

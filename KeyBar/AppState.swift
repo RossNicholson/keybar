@@ -181,12 +181,14 @@ final class AppSettings {
     static let clipboardChoices: [TimeInterval] = [20, 60, 120]
 
     /// Whether to ask with Touch ID before Claude Code (or another app) uses a
-    /// key: 0 never, -1 every time, otherwise once per this many seconds
-    var approvalSeconds: TimeInterval = UserDefaults.standard.double(forKey: "approvalSeconds") {
+    /// key: 0 never, -1 every time, otherwise once per this many seconds for
+    /// the same keys from the same project. On (15 minutes) by default: any
+    /// program running as this user could start KeyBar's helper.
+    var approvalSeconds: TimeInterval = UserDefaults.standard.object(forKey: "approvalSeconds") as? Double ?? 900 {
         didSet { UserDefaults.standard.set(approvalSeconds, forKey: "approvalSeconds") }
     }
 
-    static let approvalChoices: [TimeInterval] = [0, -1, 900, 3600]
+    static let approvalChoices: [TimeInterval] = [-1, 900, 3600, 0]
 
     static func approvalLabel(_ seconds: TimeInterval) -> String {
         switch seconds {

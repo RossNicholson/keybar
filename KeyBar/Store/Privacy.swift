@@ -40,22 +40,40 @@ enum OwnerCheck {
     }
 
     /// The same, for a background thread that can wait (the bridge). Never
-    /// call it on the main thread.
-    nonisolated static func confirmBlocking(_ reason: String) -> Bool {
+    /// call it on the main thread. Unanswered after `timeout`, the prompt is
+    /// taken down and counts as a no, so a late yes can't let through a
+    /// request whose caller has already given up.
+    nonisolated static func confirmBlocking(_ reason: String, timeout: TimeInterval) -> Bool {
         let context = LAContext()
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { return true }
         let done = DispatchSemaphore(value: 0)
         let result = Result()
         context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, _ in
-            result.value = success
+            result.set(success)
             done.signal()
         }
-        done.wait()
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            result.expire()
+            context.invalidate()
+            _ = done.wait(timeout: .now() + 2)
+        }
         return result.value
     }
 
     private final class Result: @unchecked Sendable {
-        var value = false
+        private let lock = NSLock()
+        private var answer = false
+        private var expired = false
+
+        func set(_ success: Bool) {
+            lock.withLock { if !expired { answer = success } }
+        }
+
+        func expire() {
+            lock.withLock { expired = true; answer = false }
+        }
+
+        var value: Bool { lock.withLock { answer } }
     }
 
     static func confirm(_ reason: String, required: Bool) async -> Bool {

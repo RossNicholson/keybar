@@ -19,6 +19,11 @@ enum Bridge {
 
     /// The longest we wait for the app to answer
     static let replyTimeout: TimeInterval = 30
+
+    /// How long the app leaves a Touch ID prompt up, and how long the helper
+    /// waits for a reply when there might be one (a little longer)
+    static let approvalTimeout: TimeInterval = 170
+    static let resolveTimeout: TimeInterval = 180
 }
 
 struct BridgeRequest: Codable, Sendable {
@@ -34,6 +39,9 @@ struct BridgeRequest: Codable, Sendable {
     var action: Action
     /// The folder the command runs in, for keys limited to some projects
     var cwd: String
+    /// The folder Claude Code was started in. A key limited to some projects
+    /// must be allowed in this one too, whatever `cwd` the command asks for.
+    var projectFolder: String? = nil
     /// Who's asking, shown in the activity log, e.g. "Claude Code"
     var client: String = "Claude Code"
     var names: [String]? = nil
@@ -71,12 +79,14 @@ enum BridgeError: Error, CustomStringConvertible {
     case unreachable
     case io(String)
     case badReply
+    case notKeyBar
 
     var description: String {
         switch self {
         case .unreachable: return "KeyBar isn't running, and couldn't be started."
         case .io(let detail): return "Couldn't talk to KeyBar (\(detail))."
         case .badReply: return "KeyBar sent a reply that couldn't be read."
+        case .notKeyBar: return "Something other than KeyBar is listening on KeyBar's socket, so no keys were asked for. Quit and reopen KeyBar."
         }
     }
 }
@@ -101,9 +111,11 @@ enum BridgeSocket {
         return addr
     }
 
-    /// Sends one request to the app and waits for its reply
+    /// Sends one request to the app and waits for its reply. `server` checks
+    /// who's listening before anything is sent.
     static func send(_ request: BridgeRequest, path: String = Bridge.socketPath,
-                     timeout: TimeInterval = Bridge.replyTimeout) throws -> BridgeReply {
+                     timeout: TimeInterval = Bridge.replyTimeout,
+                     server: (Int32) -> Bool = { _ in true }) throws -> BridgeReply {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw BridgeError.io("socket") }
         defer { close(fd) }
@@ -114,6 +126,7 @@ enum BridgeSocket {
             }
         }
         guard connected == 0 else { throw BridgeError.unreachable }
+        guard server(fd) else { throw BridgeError.notKeyBar }
         setTimeout(fd, timeout)
 
         var data = try JSONEncoder().encode(request)

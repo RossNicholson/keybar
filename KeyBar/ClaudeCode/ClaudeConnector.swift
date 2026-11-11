@@ -81,6 +81,42 @@ final class ClaudeConnector {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
+    /// The config to change: empty if there's no file yet, but an error if
+    /// there is one that can't be read, so it's never replaced by accident
+    private func configForEditing() throws -> [String: Any] {
+        guard FileManager.default.fileExists(atPath: configURL.path) else { return [:] }
+        guard let config = readConfig() else { throw ConnectorError.unreadable(configURL.path) }
+        return config
+    }
+
+    enum ConnectorError: LocalizedError {
+        case unreadable(String)
+        case translocated
+
+        var errorDescription: String? {
+            switch self {
+            case .unreadable(let path):
+                return "\(path) couldn't be read, so KeyBar left it alone."
+            case .translocated:
+                return "macOS is running KeyBar from a temporary copy. Move KeyBar to your Applications folder, open it from there and connect again."
+            }
+        }
+    }
+
+    /// macOS runs apps opened straight from a download from a temporary,
+    /// read-only copy; a path to that would stop working
+    var isTranslocated: Bool { helperPath.contains("/AppTranslocation/") }
+
+    /// Writes `data` over the file at `url`, following a symlink to the real
+    /// file and keeping its permissions (new files are private)
+    static func replaceFile(_ url: URL, with data: Data) throws {
+        let fm = FileManager.default
+        let target = url.resolvingSymlinksInPath()
+        let permissions = (try? fm.attributesOfItem(atPath: target.path))?[.posixPermissions] as? NSNumber
+        try data.write(to: target, options: .atomic)
+        try fm.setAttributes([.posixPermissions: permissions ?? NSNumber(value: 0o600)], ofItemAtPath: target.path)
+    }
+
     // MARK: - Connecting
 
     func connect(addReminder: Bool) async {
@@ -88,18 +124,20 @@ final class ClaudeConnector {
         lastError = nil
         testResult = nil
         defer { isWorking = false }
+        guard !isTranslocated else {
+            lastError = ConnectorError.translocated.localizedDescription
+            return
+        }
 
-        // Claude Code's own command is the safest way to change its settings;
-        // without it, edit ~/.claude.json directly
+        // Claude Code's own command is the safest way to change its settings,
+        // as it may be writing the file itself; without it, edit ~/.claude.json
         if let claude = Self.findClaude() {
             _ = await Self.run(claude, ["mcp", "remove", "--scope", "user", Self.serverName])
             let added = await Self.run(claude, ["mcp", "add", "--scope", "user", Self.serverName, "--", helperPath, "mcp"])
             if added.status != 0 {
-                do {
-                    try writeServerEntry()
-                } catch {
-                    lastError = "Couldn't add KeyBar to Claude Code: \(added.output.nonEmpty ?? error.localizedDescription)"
-                }
+                lastError = "Claude Code couldn't add KeyBar: \(added.output.nonEmpty ?? "exit \(added.status)")"
+                refresh()
+                return
             }
         } else {
             do {
@@ -134,7 +172,7 @@ final class ClaudeConnector {
     }
 
     private func writeServerEntry() throws {
-        var config = readConfig() ?? [:]
+        var config = try configForEditing()
         var servers = config["mcpServers"] as? [String: Any] ?? [:]
         servers[Self.serverName] = ["type": "stdio", "command": helperPath, "args": ["mcp"], "env": [String: String]()]
         config["mcpServers"] = servers
@@ -142,7 +180,8 @@ final class ClaudeConnector {
     }
 
     private func removeServerEntry() throws {
-        guard var config = readConfig(), var servers = config["mcpServers"] as? [String: Any] else { return }
+        var config = try configForEditing()
+        guard var servers = config["mcpServers"] as? [String: Any] else { return }
         servers[Self.serverName] = nil
         config["mcpServers"] = servers
         try writeConfig(config)
@@ -150,11 +189,7 @@ final class ClaudeConnector {
 
     private func writeConfig(_ config: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .withoutEscapingSlashes])
-        let existed = FileManager.default.fileExists(atPath: configURL.path)
-        try data.write(to: configURL, options: .atomic)
-        if !existed {
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
-        }
+        try Self.replaceFile(configURL, with: data)
     }
 
     // MARK: - The CLAUDE.md note
@@ -172,7 +207,16 @@ final class ClaudeConnector {
 
     func setReminder(_ on: Bool) {
         let fm = FileManager.default
-        var text = (try? String(contentsOf: memoryURL, encoding: .utf8)) ?? ""
+        var text = ""
+        if fm.fileExists(atPath: memoryURL.path) {
+            // Never rewrite a CLAUDE.md that couldn't be read: it'd be lost
+            guard let existing = try? String(contentsOf: memoryURL, encoding: .utf8) else {
+                lastError = ConnectorError.unreadable(memoryURL.path).localizedDescription
+                return
+            }
+            text = existing
+        }
+        let original = text
         // Take out any existing note first
         if let start = text.range(of: Self.reminderStart), let end = text.range(of: Self.reminderEnd, range: start.upperBound..<text.endIndex) {
             var removeEnd = end.upperBound
@@ -192,7 +236,7 @@ final class ClaudeConnector {
         do {
             try fm.createDirectory(at: memoryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             if text.isEmpty && !fm.fileExists(atPath: memoryURL.path) { hasReminder = false; return }
-            try text.write(to: memoryURL, atomically: true, encoding: .utf8)
+            if text != original { try Self.replaceFile(memoryURL, with: Data(text.utf8)) }
         } catch {
             lastError = "Couldn't update \(memoryURL.path): \(error.localizedDescription)"
         }

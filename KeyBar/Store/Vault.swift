@@ -4,11 +4,17 @@ import Security
 /// Where key values live. The app uses the Keychain; tests and demo mode use
 /// memory.
 protocol Vault: AnyObject {
-    func read(_ name: String) throws -> String?
+    /// `interactive` false never shows a Keychain dialog: an item macOS would
+    /// ask about reads as an error instead
+    func read(_ name: String, interactive: Bool) throws -> String?
     func write(_ name: String, value: String) throws
     func delete(_ name: String) throws
     /// Every key name stored, so keys added before the index existed are found
     func names() throws -> [String]
+}
+
+extension Vault {
+    func read(_ name: String) throws -> String? { try read(name, interactive: true) }
 }
 
 enum VaultError: LocalizedError {
@@ -46,10 +52,11 @@ final class KeychainVault: Vault {
         return query
     }
 
-    func read(_ name: String) throws -> String? {
+    func read(_ name: String, interactive: Bool) throws -> String? {
         var query = query(name)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
+        if !interactive { query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail }
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
@@ -99,7 +106,7 @@ final class MemoryVault: Vault {
         self.values = values
     }
 
-    func read(_ name: String) throws -> String? { values[name] }
+    func read(_ name: String, interactive: Bool) throws -> String? { values[name] }
     func write(_ name: String, value: String) throws { values[name] = value }
     func delete(_ name: String) throws { values[name] = nil }
     func names() throws -> [String] { Array(values.keys) }

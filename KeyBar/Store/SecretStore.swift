@@ -78,9 +78,10 @@ final class SecretStore {
         return value
     }
 
-    /// Every value, for checking a command doesn't contain one
+    /// Every value, for checking a command doesn't contain one. Never shows
+    /// a Keychain dialog: a key macOS would ask about is skipped.
     func allValues() -> [String] {
-        records.compactMap { try? vault.read($0.name) }
+        records.compactMap { try? vault.read($0.name, interactive: false) }
     }
 
     /// The groups in use, in display order

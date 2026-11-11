@@ -2,12 +2,17 @@ import Foundation
 
 /// A small MCP server over stdio: newline-delimited JSON-RPC 2.0. It offers
 /// two tools, one that lists the stored keys' names and one that runs a
-/// command with some of them set as environment variables.
-final class MCPServer {
+/// command with some of them set as environment variables. Tool calls run in
+/// the background so a long command doesn't hold up pings or cancelling it.
+final class MCPServer: @unchecked Sendable {
     let version: String
     private let out = FileHandle.standardOutput
+    private let lock = NSLock()
     /// Who started us, from `initialize`, for KeyBar's activity log
     private var client = "Claude Code"
+    /// Commands running for tool calls, by request ID, so they can be cancelled
+    private var running: [String: CommandRunner.Handle] = [:]
+    private let calls = DispatchGroup()
 
     init(version: String) {
         self.version = version
@@ -32,6 +37,8 @@ final class MCPServer {
             }
             handle(message)
         }
+        // stdin closed: let calls in progress finish and send their replies
+        calls.wait()
     }
 
     // MARK: - Messages
@@ -42,13 +49,19 @@ final class MCPServer {
         let params = message["params"] as? [String: Any] ?? [:]
 
         // Notifications (no id) need no reply
-        guard let id, !(id is NSNull) else { return }
+        guard let id, !(id is NSNull) else {
+            if method == "notifications/cancelled", let requestID = params["requestId"] {
+                cancel(String(describing: requestID))
+            }
+            return
+        }
 
         switch method {
         case "initialize":
             let requested = params["protocolVersion"] as? String
             if let name = (params["clientInfo"] as? [String: Any])?["name"] as? String, !name.isEmpty {
-                client = name.lowercased().contains("claude") ? "Claude Code" : String(name.prefix(40))
+                let label = name.lowercased().contains("claude") ? "Claude Code" : String(name.prefix(40))
+                lock.withLock { client = label }
             }
             reply(id, [
                 "protocolVersion": requested ?? "2025-06-18",
@@ -62,8 +75,13 @@ final class MCPServer {
             reply(id, ["tools": Self.tools])
         case "tools/call":
             let name = params["name"] as? String ?? ""
-            let arguments = params["arguments"] as? [String: Any] ?? [:]
-            reply(id, callTool(name, arguments))
+            let call = Unchecked((id: id, arguments: params["arguments"] as? [String: Any] ?? [:]))
+            calls.enter()
+            DispatchQueue.global().async { [self] in
+                let key = String(describing: call.value.id)
+                reply(call.value.id, callTool(name, call.value.arguments, requestID: key))
+                calls.leave()
+            }
         case "resources/list":
             reply(id, ["resources": []])
         case "prompts/list":
@@ -80,7 +98,14 @@ final class MCPServer {
     private func send(_ object: [String: Any]) {
         guard var data = try? JSONSerialization.data(withJSONObject: object, options: [.withoutEscapingSlashes]) else { return }
         data.append(0x0A)
-        out.write(data)
+        lock.withLock { out.write(data) }
+    }
+
+    private var clientName: String { lock.withLock { client } }
+
+    /// Stops the command a cancelled tool call is running
+    private func cancel(_ requestID: String) {
+        lock.withLock { running[requestID] }?.stop()
     }
 
     // MARK: - Tools
@@ -129,12 +154,12 @@ final class MCPServer {
         ],
     ]
 
-    func callTool(_ name: String, _ arguments: [String: Any]) -> [String: Any] {
+    func callTool(_ name: String, _ arguments: [String: Any], requestID: String = UUID().uuidString) -> [String: Any] {
         switch name {
         case "list_secrets":
             return listSecrets()
         case "run_with_secrets":
-            return runWithSecrets(arguments)
+            return runWithSecrets(arguments, requestID: requestID)
         default:
             return toolError("There's no tool called \(name).")
         }
@@ -146,12 +171,15 @@ final class MCPServer {
 
     private func toolError(_ text: String) -> [String: Any] { toolText(text, isError: true) }
 
-    private var projectFolder: String { FileManager.default.currentDirectoryPath }
+    /// The folder Claude Code started us in
+    private let projectFolder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .resolvingSymlinksInPath().standardizedFileURL.path
 
     private func listSecrets() -> [String: Any] {
         let reply: BridgeReply
         do {
-            reply = try AppLink.send(BridgeRequest(action: .list, cwd: projectFolder, client: client))
+            reply = try AppLink.send(BridgeRequest(action: .list, cwd: projectFolder, projectFolder: projectFolder,
+                                                   client: clientName))
         } catch {
             return toolError("\(error)")
         }
@@ -170,7 +198,7 @@ final class MCPServer {
         return toolText(lines.joined(separator: "\n"))
     }
 
-    private func runWithSecrets(_ arguments: [String: Any]) -> [String: Any] {
+    private func runWithSecrets(_ arguments: [String: Any], requestID: String) -> [String: Any] {
         guard let command = arguments["command"] as? String,
               !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return toolError("Give a command to run.")
@@ -195,17 +223,26 @@ final class MCPServer {
 
         let timeout = min(600, max(1, (arguments["timeoutSeconds"] as? NSNumber)?.doubleValue ?? 120))
 
+        let client = clientName
+        let wanted = Set(names)
         let reply: BridgeReply
         do {
             // Long enough for the user to answer a Touch ID prompt
-            reply = try AppLink.send(BridgeRequest(action: .resolve, cwd: cwd, client: client,
-                                                   names: Array(Set(names)), command: command), timeout: 180)
+            reply = try AppLink.send(BridgeRequest(action: .resolve, cwd: cwd, projectFolder: projectFolder,
+                                                   client: client, names: Array(wanted), command: command),
+                                     timeout: Bridge.resolveTimeout)
         } catch {
             return toolError("\(error)")
         }
-        guard reply.ok, let values = reply.values else { return toolError(reply.error ?? "KeyBar refused.") }
+        guard reply.ok, let reported = reply.values else { return toolError(reply.error ?? "KeyBar refused.") }
+        // Only the keys asked for: nothing else gets into the environment
+        // (BASH_ENV, PATH…), whatever the reply says
+        let values = reported.filter { wanted.contains($0.key) }
 
-        let result = CommandRunner.run(command, in: cwd, extraEnvironment: values, timeout: timeout)
+        let handle = CommandRunner.Handle()
+        lock.withLock { running[requestID] = handle }
+        let result = CommandRunner.run(command, in: cwd, extraEnvironment: values, timeout: timeout, handle: handle)
+        lock.withLock { running[requestID] = nil }
         let redactor = Redactor(secrets: Array(values.values))
         let stdout = redactor.redact(result.stdout)
         let stderr = redactor.redact(result.stderr)
@@ -215,7 +252,9 @@ final class MCPServer {
                                             exitCode: result.exitCode, redactions: redactions,
                                             timedOut: result.timedOut), timeout: 5)
 
-        var text = result.timedOut
+        var text = result.cancelled
+            ? "Cancelled."
+            : result.timedOut
             ? "Stopped after \(Int(timeout)) seconds (timed out)."
             : "Exit code: \(result.exitCode)"
         if redactions > 0 {
@@ -230,15 +269,27 @@ final class MCPServer {
 
 /// Reaches the KeyBar app, starting it if it isn't running
 enum AppLink {
+    /// Whoever's listening must be the KeyBar app, signed by our team
+    nonisolated(unsafe) private static let appRequirement = CodeIdentity.requirement(identifier: Bridge.appBundleID)
+
+    private static func isKeyBar(_ fd: Int32) -> Bool {
+        CodeIdentity.peer(fd, meets: appRequirement)
+    }
+
     static func send(_ request: BridgeRequest, timeout: TimeInterval = Bridge.replyTimeout) throws -> BridgeReply {
         do {
-            return try BridgeSocket.send(request, timeout: timeout)
+            return try BridgeSocket.send(request, timeout: timeout, server: isKeyBar)
         } catch BridgeError.unreachable {
             launchApp()
-            // Give it a few seconds to start listening
+            // Give it a few seconds to start listening. Only "not there yet"
+            // is retried: anything else would send the request twice.
             for _ in 0..<40 {
                 Thread.sleep(forTimeInterval: 0.25)
-                if let reply = try? BridgeSocket.send(request, timeout: timeout) { return reply }
+                do {
+                    return try BridgeSocket.send(request, timeout: timeout, server: isKeyBar)
+                } catch BridgeError.unreachable {
+                    continue
+                }
             }
             throw BridgeError.unreachable
         }
@@ -259,4 +310,10 @@ enum AppLink {
         try? process.run()
         process.waitUntilExit()
     }
+}
+
+/// Carries a value that isn't Sendable onto another thread that alone uses it
+struct Unchecked<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
 }

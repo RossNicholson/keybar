@@ -2,7 +2,8 @@ import Foundation
 
 /// Hides key values in a command's output before Claude sees it. It finds each
 /// key as written, base64-encoded (standard and URL-safe, with or without
-/// padding), URL-encoded, in hex and backwards, plus long fragments of it. It's a safety
+/// padding, alone or inside longer data such as "user:KEY" in a Basic auth
+/// header), URL-encoded, in hex and backwards, plus long fragments of it. It's a safety
 /// net, not a sandbox: a command that cuts a key up or changes it some other
 /// way before printing it gets past.
 struct Redactor: Sendable {
@@ -52,6 +53,28 @@ struct Redactor: Sendable {
         let jsonEscaped = secret.replacingOccurrences(of: "/", with: "\\/")
         let reversed = String(secret.reversed())
         return [secret, base64, unpadded, urlSafe, percent, hex, hex.uppercased(), jsonEscaped, reversed]
+            + embeddedBase64(of: data)
+    }
+
+    /// Base64 of the key when it's part of longer data: it then starts 0, 1
+    /// or 2 bytes into a 3-byte group, and the characters at either end mix
+    /// in its neighbours' bits. What's left in the middle is the same
+    /// whatever the neighbours are, so that's what's looked for.
+    static func embeddedBase64(of data: Data) -> [String] {
+        var results: [String] = []
+        for offset in 0...2 {
+            let padded = Data(repeating: 0, count: offset) + data
+            let encoded = Array(padded.base64EncodedString().utf8)
+            // The first group holds `offset` bytes that aren't the key's
+            let start = offset == 0 ? 0 : 4
+            // A last, partial group would take in whatever follows the key
+            let end = encoded.count - (padded.count % 3 == 0 ? 0 : 4)
+            guard end - start >= 8 else { continue }
+            let core = String(decoding: encoded[start..<end], as: UTF8.self)
+            results.append(core)
+            results.append(core.replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_"))
+        }
+        return results
     }
 
     var isEmpty: Bool { forms.isEmpty }

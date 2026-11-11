@@ -27,7 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !testing else { return }
 
         setUpStatusItem()
-        if !demo { startBridge() }
+        // Demo keys answer the helper too, so the whole flow can be tried
+        // without real keys
+        startBridge()
         Task { await state.updater.checkSilent() }
 
         let launchedByHelper = UserDefaults.standard.bool(forKey: "launchedByHelper")
@@ -57,15 +59,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func startBridge() {
         let policy = BridgePolicy(store: state.store, log: state.log, settings: state.settings)
         self.policy = policy
+        let prompting = PromptGate()
         let server = BridgeServer { request in
             // The store lives on the main thread. Touch ID is asked for from
             // this background thread, so the app stays responsive meanwhile.
             let prompt = DispatchQueue.main.sync { MainActor.assumeIsolated { policy.approvalPrompt(for: request) } }
             if let prompt {
-                guard OwnerCheck.confirmBlocking(prompt) else {
+                // One prompt at a time, so a flood of requests can't stack them up
+                guard prompting.enter() else {
+                    return .failure("KeyBar is already waiting for the user to answer a Touch ID prompt. Try again once they have.")
+                }
+                // Answered before the helper stops waiting for a reply
+                let allowed = OwnerCheck.confirmBlocking(prompt, timeout: Bridge.approvalTimeout)
+                prompting.leave()
+                guard allowed else {
                     return DispatchQueue.main.sync { MainActor.assumeIsolated { policy.declined(request) } }
                 }
-                DispatchQueue.main.sync { MainActor.assumeIsolated { policy.approved() } }
+                DispatchQueue.main.sync { MainActor.assumeIsolated { policy.approved(request) } }
             }
             return DispatchQueue.main.sync { MainActor.assumeIsolated { policy.handle(request) } }
         }
@@ -174,4 +184,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 extension Notification.Name {
     static let keyBarAddKey = Notification.Name("KeyBarAddKey")
+}
+
+/// Lets one Touch ID prompt be waiting at a time
+private final class PromptGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var busy = false
+
+    func enter() -> Bool {
+        lock.withLock {
+            guard !busy else { return false }
+            busy = true
+            return true
+        }
+    }
+
+    func leave() {
+        lock.withLock { busy = false }
+    }
 }

@@ -80,7 +80,7 @@ Other MCP clients can use the same server; the activity log shows them by name.
 - **Activity log.** Every use, with the key, the program it ran, the folder, the exit code and whether anything was hidden, labelled *By Claude Code* or *By you*. Never values.
 - **Folder limits.** Lock a key to the project folders that need it; a command run anywhere else is refused.
 - **Refuses pasted keys.** A command with a key's actual value written into it is refused, so values don't end up in Claude's transcript.
-- **Touch ID for Claude, too.** Optionally ask before Claude Code uses a key: every time, or once per 15 minutes or hour.
+- **Touch ID for Claude, too.** Before Claude Code uses a key, KeyBar asks with Touch ID and shows the command it wants to run. By default one yes covers the same keys from the same project for 15 minutes; choose every time, an hour or never in Settings.
 - **Knows 468 services.** CLOUDFLARE_API_TOKEN is recognised as Cloudflare's API token, STRIPE_PUBLISHABLE_KEY as Stripe's publishable key. The list is built in, so recognising one never touches the network.
 - **Recognises pasted keys.** Paste `sk-ant-…`, `ghp_…`, `sk_live_…` and dozens more and the name is filled in for you. Paste a whole `NAME=value` line and both fields fill.
 - **Imports .env files.** Pick which lines to bring in, then delete the file.
@@ -92,15 +92,16 @@ Other MCP clients can use the same server; the activity log shows them by name.
 
 ## Security
 
-**What KeyBar protects against:** keys sitting in plain-text `.env` files, shell history or chat transcripts; Claude reading a key's value; a command printing a key (as written, base64, URL-encoded, hex, backwards or a long fragment of it); keys being used from the wrong project.
+**What KeyBar protects against:** keys sitting in plain-text `.env` files, shell history or chat transcripts; Claude reading a key's value; a command printing a key (as written, base64 including inside a Basic auth header, URL-encoded, hex, backwards or a long fragment of it); keys being used from the wrong project, even if Claude points a command at another project's folder.
 
 **How it's built:**
 
 - The MCP server is a small helper inside the app (`Contents/Helpers/keybar`). It asks the running app for keys over a Unix socket in `~/.keybar` that only your user can open.
-- The app checks every caller's code signature and only answers its own helper, signed by the same Apple developer team. A script, or a copy of the helper signed by anyone else, is turned away.
-- Only the app reads the Keychain. The helper gets just the keys a command asked for, sets them as environment variables for that one command, and forgets them.
+- The app checks every caller's code signature and only answers its own helper, signed by the same Apple developer team. A script, or a copy of the helper signed by anyone else, is turned away. The helper checks the app's signature the same way before asking for anything, so nothing else can pose as KeyBar on the socket.
+- Only the app reads the Keychain. The helper gets just the keys a command asked for, sets them as environment variables for that one command, and forgets them. A command that times out or is cancelled is stopped along with everything it started.
+- Touch ID prompts name the app asking, the keys, the project and the command, time out after a few minutes, and only one waits at a time.
 
-**What it can't stop.** The command itself has the key. A command could change it before printing it (split it up, encrypt it) or send it over the network. Hiding it in the output is a safety net, not a sandbox. Claude Code asks you before running commands unless you've told it not to, so read what it wants to run, and use folder limits and *Ask before Claude uses a key* for the keys that matter most.
+**What it can't stop.** Programs already running as you on your Mac are inside the boundary: one could start KeyBar's own helper just as Claude Code does. That's why *Ask before Claude uses a key* is on by default; with it set to *Never*, any of your programs can use your keys without asking. The command itself has the key. A command could change it before printing it (split it up, encrypt it) or send it over the network. Hiding it in the output is a safety net, not a sandbox. Claude Code asks you before running commands unless you've told it not to, so read what it wants to run, and use folder limits and *Ask before Claude uses a key* for the keys that matter most.
 
 ## Privacy
 
