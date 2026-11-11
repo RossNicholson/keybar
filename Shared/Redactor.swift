@@ -2,7 +2,7 @@ import Foundation
 
 /// Hides key values in a command's output before Claude sees it. It finds each
 /// key as written, base64-encoded (standard and URL-safe, with or without
-/// padding), URL-encoded and in hex, plus long fragments of it. It's a safety
+/// padding), URL-encoded, in hex and backwards, plus long fragments of it. It's a safety
 /// net, not a sandbox: a command that cuts a key up or changes it some other
 /// way before printing it gets past.
 struct Redactor: Sendable {
@@ -50,7 +50,8 @@ struct Redactor: Sendable {
         let hex = data.map { String(format: "%02x", $0) }.joined()
         // JSON writers often escape slashes
         let jsonEscaped = secret.replacingOccurrences(of: "/", with: "\\/")
-        return [secret, base64, unpadded, urlSafe, percent, hex, hex.uppercased(), jsonEscaped]
+        let reversed = String(secret.reversed())
+        return [secret, base64, unpadded, urlSafe, percent, hex, hex.uppercased(), jsonEscaped, reversed]
     }
 
     var isEmpty: Bool { forms.isEmpty }

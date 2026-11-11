@@ -59,7 +59,7 @@ struct ClaudeCodeView: View {
             SectionLabel(text: "What it can't stop")
             VStack(alignment: .leading, spacing: 8) {
                 Text("The command itself has the key, so a command could change it before printing it (reverse it, say) or send it somewhere over the network. Hiding it in the output is a safety net, not a sandbox. Claude Code asks you before running commands unless you've told it not to, so read what it wants to run.")
-                Text("To limit the risk, lock keys to the project folders that need them (Keys → edit a key → Limit to a folder).")
+                Text("To limit the risk, lock keys to the project folders that need them (Keys → edit a key → Limit to a folder), and turn on Settings → Ask before Claude uses a key, so each use needs your Touch ID.")
             }
             .font(.mono(10.5))
             .foregroundStyle(AppColors.text)

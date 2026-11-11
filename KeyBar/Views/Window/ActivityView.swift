@@ -70,7 +70,7 @@ struct ActivityRow: View {
                             .truncationMode(.middle)
                     }
                 }
-                let details = [entry.detail, entry.folder.map(BridgePolicy.tidy)].compactMap { $0 }
+                let details = [entry.detail, entry.action == .refused ? nil : entry.folder.map(BridgePolicy.tidy)].compactMap { $0 }
                 if !details.isEmpty {
                     Text(details.joined(separator: " · "))
                         .font(.mono(9.5))

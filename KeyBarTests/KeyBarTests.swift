@@ -234,6 +234,40 @@ final class PolicyTests: XCTestCase {
         XCTAssertEqual(log.entries.last?.action, .refused)
     }
 
+    func testApprovalPrompts() {
+        let settings = AppSettings()
+        let saved = settings.approvalSeconds
+        defer { settings.approvalSeconds = saved }   // the test host shares the app's defaults
+        let guarded = BridgePolicy(store: store, log: log, settings: settings)
+        let use = request(["GITHUB_TOKEN"], "gh api user")
+
+        settings.approvalSeconds = 0
+        XCTAssertNil(guarded.approvalPrompt(for: use))
+
+        settings.approvalSeconds = -1
+        XCTAssertEqual(guarded.approvalPrompt(for: use), "let Claude Code use GITHUB_TOKEN to run gh")
+        guarded.approved()
+        XCTAssertNotNil(guarded.approvalPrompt(for: use), "every time means every time")
+        XCTAssertNil(guarded.approvalPrompt(for: request(["NOPE"], "x")), "no prompt for a request that'll be refused")
+        XCTAssertNil(guarded.approvalPrompt(for: BridgeRequest(action: .list, cwd: "/tmp")))
+
+        settings.approvalSeconds = 900
+        XCTAssertNil(guarded.approvalPrompt(for: use), "approved within the last 15 minutes")
+
+        let reply = guarded.declined(use)
+        XCTAssertFalse(reply.ok)
+        XCTAssertNil(reply.values)
+        XCTAssertEqual(log.entries.first?.action, .refused)
+    }
+
+    func testOtherClientsAreNamed() {
+        var other = request(["GITHUB_TOKEN"], "gh api user")
+        other.client = "cursor"
+        _ = policy.handle(other)
+        XCTAssertEqual(log.entries.first?.source, .other)
+        XCTAssertEqual(log.entries.first?.sourceLabel, "By cursor")
+    }
+
     func testRefusesCommandsWithAValueInThem() {
         let reply = policy.handle(request(["GITHUB_TOKEN"], "curl -H 'Authorization: sk_test_abcdefgh'"))
         XCTAssertFalse(reply.ok)

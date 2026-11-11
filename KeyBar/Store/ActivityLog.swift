@@ -23,12 +23,14 @@ struct ActivityEntry: Codable, Identifiable, Hashable, Sendable {
     var folder: String?
     /// e.g. "Exit 0 · 1 copy hidden", or why it was refused
     var detail: String?
+    /// The app that asked, when it isn't Claude Code or you
+    var client: String? = nil
 
     var sourceLabel: String {
         switch source {
         case .you: return "By you"
         case .claudeCode: return "By Claude Code"
-        case .other: return "By another app"
+        case .other: return "By \(client ?? "another app")"
         }
     }
 

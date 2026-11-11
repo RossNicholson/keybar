@@ -6,6 +6,8 @@ import Foundation
 final class MCPServer {
     let version: String
     private let out = FileHandle.standardOutput
+    /// Who started us, from `initialize`, for KeyBar's activity log
+    private var client = "Claude Code"
 
     init(version: String) {
         self.version = version
@@ -45,6 +47,9 @@ final class MCPServer {
         switch method {
         case "initialize":
             let requested = params["protocolVersion"] as? String
+            if let name = (params["clientInfo"] as? [String: Any])?["name"] as? String, !name.isEmpty {
+                client = name.lowercased().contains("claude") ? "Claude Code" : String(name.prefix(40))
+            }
             reply(id, [
                 "protocolVersion": requested ?? "2025-06-18",
                 "capabilities": ["tools": ["listChanged": false]],
@@ -146,7 +151,7 @@ final class MCPServer {
     private func listSecrets() -> [String: Any] {
         let reply: BridgeReply
         do {
-            reply = try AppLink.send(BridgeRequest(action: .list, cwd: projectFolder))
+            reply = try AppLink.send(BridgeRequest(action: .list, cwd: projectFolder, client: client))
         } catch {
             return toolError("\(error)")
         }
@@ -192,7 +197,9 @@ final class MCPServer {
 
         let reply: BridgeReply
         do {
-            reply = try AppLink.send(BridgeRequest(action: .resolve, cwd: cwd, names: Array(Set(names)), command: command))
+            // Long enough for the user to answer a Touch ID prompt
+            reply = try AppLink.send(BridgeRequest(action: .resolve, cwd: cwd, client: client,
+                                                   names: Array(Set(names)), command: command), timeout: 180)
         } catch {
             return toolError("\(error)")
         }
@@ -204,7 +211,7 @@ final class MCPServer {
         let stderr = redactor.redact(result.stderr)
         let redactions = stdout.count + stderr.count
 
-        _ = try? AppLink.send(BridgeRequest(action: .finished, cwd: cwd, runID: reply.runID,
+        _ = try? AppLink.send(BridgeRequest(action: .finished, cwd: cwd, client: client, runID: reply.runID,
                                             exitCode: result.exitCode, redactions: redactions,
                                             timedOut: result.timedOut), timeout: 5)
 

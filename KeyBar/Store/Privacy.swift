@@ -39,6 +39,25 @@ enum OwnerCheck {
         LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
     }
 
+    /// The same, for a background thread that can wait (the bridge). Never
+    /// call it on the main thread.
+    nonisolated static func confirmBlocking(_ reason: String) -> Bool {
+        let context = LAContext()
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { return true }
+        let done = DispatchSemaphore(value: 0)
+        let result = Result()
+        context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, _ in
+            result.value = success
+            done.signal()
+        }
+        done.wait()
+        return result.value
+    }
+
+    private final class Result: @unchecked Sendable {
+        var value = false
+    }
+
     static func confirm(_ reason: String, required: Bool) async -> Bool {
         guard required else { return true }
         let context = LAContext()

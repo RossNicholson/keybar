@@ -180,6 +180,23 @@ final class AppSettings {
 
     static let clipboardChoices: [TimeInterval] = [20, 60, 120]
 
+    /// Whether to ask with Touch ID before Claude Code (or another app) uses a
+    /// key: 0 never, -1 every time, otherwise once per this many seconds
+    var approvalSeconds: TimeInterval = UserDefaults.standard.double(forKey: "approvalSeconds") {
+        didSet { UserDefaults.standard.set(approvalSeconds, forKey: "approvalSeconds") }
+    }
+
+    static let approvalChoices: [TimeInterval] = [0, -1, 900, 3600]
+
+    static func approvalLabel(_ seconds: TimeInterval) -> String {
+        switch seconds {
+        case 0: return "Never"
+        case -1: return "Every time"
+        case 900: return "15 min"
+        default: return "1 hour"
+        }
+    }
+
     static func label(forSeconds seconds: TimeInterval) -> String {
         seconds < 60 ? "\(Int(seconds)) sec" : "\(Int(seconds / 60)) min"
     }

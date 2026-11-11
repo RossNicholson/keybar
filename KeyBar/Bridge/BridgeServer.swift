@@ -125,15 +125,19 @@ final class BridgeServer: @unchecked Sendable {
 final class BridgePolicy {
     private let store: SecretStore
     private let log: ActivityLog
+    private let settings: AppSettings?
     /// Runs waiting for their "finished" report: run ID → log entry
     private var running: [String: String] = [:]
+    /// When the user last approved a use with Touch ID
+    private var lastApproval: Date?
 
     /// Values shorter than this aren't looked for in commands: too likely to match by chance
     static let literalCheckLength = 8
 
-    init(store: SecretStore, log: ActivityLog) {
+    init(store: SecretStore, log: ActivityLog, settings: AppSettings? = nil) {
         self.store = store
         self.log = log
+        self.settings = settings
     }
 
     func handle(_ request: BridgeRequest) -> BridgeReply {
@@ -148,6 +152,13 @@ final class BridgePolicy {
         request.client == "Claude Code" ? .claudeCode : .other
     }
 
+    private func entry(_ action: ActivityEntry.Action, _ request: BridgeRequest, detail: String?) -> ActivityEntry {
+        let source = source(request)
+        return ActivityEntry(action: action, source: source, names: (request.names ?? []).sorted(),
+                             program: SecretName.program(in: request.command ?? ""), folder: request.cwd,
+                             detail: detail, client: source == .other ? request.client : nil)
+    }
+
     private func list(_ request: BridgeRequest) -> BridgeReply {
         let secrets = store.sorted.map { record in
             SecretSummary(name: record.name, service: record.service?.name, kind: record.kind,
@@ -157,27 +168,50 @@ final class BridgePolicy {
         return BridgeReply(ok: true, secrets: secrets)
     }
 
-    private func resolve(_ request: BridgeRequest) -> BridgeReply {
+    // MARK: - Approval
+
+    /// What to ask with Touch ID before this request may go ahead, or nil if
+    /// it needn't ask (it's not a use, it'll be refused anyway, approval is
+    /// off, or the user approved one recently enough)
+    func approvalPrompt(for request: BridgeRequest) -> String? {
+        guard request.action == .resolve, let settings, settings.approvalSeconds != 0,
+              problem(with: request) == nil else { return nil }
+        if settings.approvalSeconds > 0, let lastApproval,
+           Date().timeIntervalSince(lastApproval) < settings.approvalSeconds {
+            return nil
+        }
+        let names = (request.names ?? []).sorted().joined(separator: ", ")
+        let program = SecretName.program(in: request.command ?? "")
+        return "let \(request.client) use \(names) to run \(program)"
+    }
+
+    func approved() {
+        lastApproval = Date()
+    }
+
+    func declined(_ request: BridgeRequest) -> BridgeReply {
+        let reason = "You didn't allow it in KeyBar's Touch ID prompt."
+        log.add(entry(.refused, request, detail: reason))
+        return .failure(reason + " Ask the user before trying again.")
+    }
+
+    // MARK: - Using keys
+
+    /// Why a request can't have its keys, or nil if it can
+    private func problem(with request: BridgeRequest) -> String? {
         let names = request.names ?? []
         let command = request.command ?? ""
-        let program = SecretName.program(in: command)
-
-        func refuse(_ reason: String) -> BridgeReply {
-            log.add(ActivityEntry(action: .refused, source: source(request), names: names, program: program,
-                                  folder: request.cwd, detail: reason))
-            return .failure(reason)
-        }
-
-        guard !names.isEmpty else { return .failure("Name at least one key.") }
+        guard !names.isEmpty else { return "Name at least one key." }
         let missing = names.filter { store.record($0) == nil }
         if !missing.isEmpty {
             let stored = store.sorted.map(\.name).joined(separator: ", ")
-            return refuse("KeyBar has no key called \(missing.joined(separator: ", ")). "
-                          + (stored.isEmpty ? "No keys are stored yet." : "Stored keys: \(stored)."))
+            return "KeyBar has no key called \(missing.joined(separator: ", ")). "
+                + (stored.isEmpty ? "No keys are stored yet." : "Stored keys: \(stored).")
         }
         for name in names {
             guard let record = store.record(name), record.isAvailable(in: request.cwd) else {
-                return refuse("\(name) can only be used in \(store.record(name)?.projectFolders.map(Self.tidy).joined(separator: ", ") ?? "some folders"), not in \(Self.tidy(request.cwd)).")
+                let folders = store.record(name)?.projectFolders.map(Self.tidy).joined(separator: ", ") ?? "some folders"
+                return "\(name) can only be used in \(folders), not in \(Self.tidy(request.cwd))."
             }
         }
         // A command with a key's value written into it would leave the value in
@@ -185,22 +219,31 @@ final class BridgePolicy {
         for record in store.records {
             guard let value = try? store.value(record.name), value.count >= Self.literalCheckLength else { continue }
             if command.contains(value) {
-                return refuse("The command contains the value of \(record.name). Use \"$\(record.name)\" and pass its name in secretNames instead.")
+                return "The command contains the value of \(record.name). Use \"$\(record.name)\" and pass its name in secretNames instead."
             }
         }
+        return nil
+    }
 
+    private func resolve(_ request: BridgeRequest) -> BridgeReply {
+        let names = request.names ?? []
+        if let problem = problem(with: request) {
+            log.add(entry(.refused, request, detail: problem))
+            return .failure(problem)
+        }
         var values: [String: String] = [:]
         for name in names {
             do {
                 values[name] = try store.value(name)
             } catch {
-                return refuse("Couldn't read \(name) from the Keychain: \(error.localizedDescription)")
+                let problem = "Couldn't read \(name) from the Keychain: \(error.localizedDescription)"
+                log.add(entry(.refused, request, detail: problem))
+                return .failure(problem)
             }
         }
         store.markUsed(names)
         let runID = UUID().uuidString
-        running[runID] = log.add(ActivityEntry(action: .ran, source: source(request), names: names.sorted(),
-                                               program: program, folder: request.cwd, detail: "Running…"))
+        running[runID] = log.add(entry(.ran, request, detail: "Running…"))
         return BridgeReply(ok: true, values: values, runID: runID)
     }
 

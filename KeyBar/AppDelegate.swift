@@ -55,11 +55,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - The bridge
 
     private func startBridge() {
-        let policy = BridgePolicy(store: state.store, log: state.log)
+        let policy = BridgePolicy(store: state.store, log: state.log, settings: state.settings)
         self.policy = policy
         let server = BridgeServer { request in
-            // The store lives on the main thread
-            DispatchQueue.main.sync { MainActor.assumeIsolated { policy.handle(request) } }
+            // The store lives on the main thread. Touch ID is asked for from
+            // this background thread, so the app stays responsive meanwhile.
+            let prompt = DispatchQueue.main.sync { MainActor.assumeIsolated { policy.approvalPrompt(for: request) } }
+            if let prompt {
+                guard OwnerCheck.confirmBlocking(prompt) else {
+                    return DispatchQueue.main.sync { MainActor.assumeIsolated { policy.declined(request) } }
+                }
+                DispatchQueue.main.sync { MainActor.assumeIsolated { policy.approved() } }
+            }
+            return DispatchQueue.main.sync { MainActor.assumeIsolated { policy.handle(request) } }
         }
         do {
             try server.start()

@@ -41,7 +41,7 @@ struct MenuBarPanel: View {
     // MARK: - Header
 
     private var header: some View {
-        PanelHeader(title: "KeyBar", subtitle: "API keys for Claude Code") {
+        PanelHeader(title: "KeyBar", subtitle: "Your API keys") {
             Mascot(size: PanelMetrics.mascot)
         } actions: {
             HeaderIconButton(symbol: "plus", help: "Add a key") { showingAdd.toggle() }
