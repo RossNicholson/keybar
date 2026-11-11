@@ -43,6 +43,7 @@ targets:
         LSUIElement: true
         NSHighResolutionCapable: true
         LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: "© 2026 Ross Nicholson. MIT licence."
     settings:
       base:
