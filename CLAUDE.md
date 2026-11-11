@@ -1,0 +1,51 @@
+# KeyBar
+
+Open-source (MIT) macOS menu bar app that keeps API keys in the login keychain and lets Claude Code use
+them through an MCP server without seeing their values. Ross's own take on Claude Keychain
+(claudekeychain.app), matching its features first, then adding more. Same look as BrewDock, ClawdBar and
+Mop Up via the shared HouseStyle package. GitHub: RossNicholson/keybar (public). Cask: `keybar` in
+RossNicholson/homebrew-tap.
+
+## Layout
+- `KeyBar/`: the app. `AppDelegate` owns the status item, the panel, the window and the bridge.
+  `Store/` (Keychain vault, index, activity log, service catalogue, .env parser, clipboard, Touch ID),
+  `Bridge/BridgeServer.swift` (socket server + `BridgePolicy`, the rules), `ClaudeCode/ClaudeConnector`
+  (registers the MCP server, CLAUDE.md note, test), `Views/` (panel, add form) and `Views/Window/`.
+- `KeyBarHelper/`: the `keybar` tool, embedded at `KeyBar.app/Contents/Helpers/keybar`. `keybar mcp` is
+  the stdio MCP server (`list_secrets`, `run_with_secrets`). Target is `KeyBarHelper` with product
+  `keybar` and module `KeyBarHelper`: `KeyBar`/`keybar` collide on the case-insensitive disk otherwise.
+- `Shared/`: compiled into both: the socket protocol (`Bridge.swift`) and `Redactor` / `SecretName`.
+
+## How a use works
+Helper → `~/.keybar/keybar.sock` (0600, dir 0700) → app checks euid + code signature (same team,
+identifier `com.rossnicholson.KeyBar.helper`) → `BridgePolicy`: optional Touch ID approval, unknown
+keys, folder limits, refuses commands containing a stored value → values back → helper runs `$SHELL -c`
+with them set → redacts output (plain, base64 variants, URL-encoded, hex, reversed, 10-char fragments of
+16+ char keys) → reports `finished` for the log.
+
+## Commands
+- `make run`: signed (Developer ID) dev build, opens it. Needs to run unsandboxed (keychain/signing).
+- `make test`: unit tests, keys in memory. `TEST_RUNNER_KEYCHAIN_TESTS=1` adds a real-keychain test
+  under a throwaway service name.
+- `make screenshots` (demo data into build/screenshots), `make icon` (redraws the app icon from Mascot).
+- `-demo YES` launch argument (Debug only): sample keys in memory.
+- Release: `make release VERSION=x.y.z` (see RELEASING.md). Ask Ross before releasing.
+
+## Gotchas
+- Tests run inside the app as host and share its UserDefaults: restore any setting a test changes.
+- Computer use can't target KeyBar until it's in /Applications; `osascript` System Events can click
+  its menu bar item, and `screencapture` sees it.
+- Don't connect Ross's real Claude Code from a dev build: it would register the build/dd path.
+
+## Where we left off (2026-11-11)
+- v0.1.0 in the repo, not released. All features of Claude Keychain plus: Touch ID approval for
+  Claude's uses (Settings), client names in the log, reversed-copy redaction, 468 services, key-shape
+  name suggestions, built-in (no network) service tiles.
+- Verified: 31 unit tests; MCP end to end against the running app (list, run, redaction, literal
+  refusal, unknown key); unsigned/re-signed callers refused; Release archive signs the helper correctly
+  (universal, hardened runtime, deep strict verify); `claude mcp add` arguments checked in a temp HOME.
+- Not yet verified on screen (Mac was locked): panel and window clicks, add-key popover typing in the
+  panel, Touch ID prompts (reveal, copy, approval), Connect against real Claude Code.
+- Before the first release: Ross adds the six CI secrets to the repo, copies docs/keybar.rb into the tap,
+  runs `make release VERSION=1.0.0`; then add KeyBar to HouseStyle's More apps and the website (no site
+  page until it's released).

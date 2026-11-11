@@ -30,11 +30,17 @@ enum VaultError: LocalizedError {
 /// the service "KeyBar". The value is only ever written there.
 final class KeychainVault: Vault {
     static let service = "KeyBar"
+    private let service: String
+
+    /// `service` is only changed by tests, to keep clear of real keys
+    init(service: String = KeychainVault.service) {
+        self.service = service
+    }
 
     private func query(_ name: String? = nil) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
+            kSecAttrService as String: service,
         ]
         if let name { query[kSecAttrAccount as String] = name }
         return query

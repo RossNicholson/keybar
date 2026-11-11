@@ -310,3 +310,25 @@ final class ConnectorTests: XCTestCase {
         XCTAssertEqual(connector.status, .elsewhere("/old/keybar"))
     }
 }
+
+/// Uses the real login keychain, under a test service name, and cleans up
+/// after itself. Opt in with KEYCHAIN_TESTS=1 (TEST_RUNNER_KEYCHAIN_TESTS=1 via xcodebuild).
+final class KeychainVaultTests: XCTestCase {
+    func testRoundTrip() throws {
+        guard ProcessInfo.processInfo.environment["KEYCHAIN_TESTS"] == "1" else {
+            throw XCTSkip("Set KEYCHAIN_TESTS=1 to use the real Keychain")
+        }
+        let vault = KeychainVault(service: "KeyBar-tests-\(UUID().uuidString)")
+        defer { for name in (try? vault.names()) ?? [] { try? vault.delete(name) } }
+        XCTAssertNil(try vault.read("KB_TEST_ONE"))
+        try vault.write("KB_TEST_ONE", value: "first")
+        try vault.write("KB_TEST_ONE", value: "second ✓")   // updates in place
+        try vault.write("KB_TEST_TWO", value: "x")
+        XCTAssertEqual(try vault.read("KB_TEST_ONE"), "second ✓")
+        XCTAssertEqual(Set(try vault.names()), ["KB_TEST_ONE", "KB_TEST_TWO"])
+        try vault.delete("KB_TEST_ONE")
+        try vault.delete("KB_TEST_ONE")   // deleting twice is fine
+        XCTAssertNil(try vault.read("KB_TEST_ONE"))
+        XCTAssertEqual(try vault.names(), ["KB_TEST_TWO"])
+    }
+}
