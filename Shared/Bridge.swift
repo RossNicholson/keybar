@@ -1,0 +1,172 @@
+import Foundation
+
+// How the `keybar` helper (the MCP server Claude Code starts) and the KeyBar
+// app talk: one JSON request and one JSON reply per connection, over a Unix
+// socket in ~/.keybar that only this user can open. The app also checks the
+// helper's code signature before it answers.
+
+enum Bridge {
+    /// ~/.keybar: the socket, the index of key names and the activity log.
+    /// Key values are never written here; they live in the Keychain.
+    static var directory: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".keybar", isDirectory: true)
+    }
+
+    static var socketPath: String { directory.appendingPathComponent("keybar.sock").path }
+
+    static let appBundleID = "com.rossnicholson.KeyBar"
+    static let helperIdentifier = "com.rossnicholson.KeyBar.helper"
+
+    /// The longest we wait for the app to answer
+    static let replyTimeout: TimeInterval = 30
+}
+
+struct BridgeRequest: Codable, Sendable {
+    enum Action: String, Codable, Sendable {
+        /// The names of the stored keys (never their values)
+        case list
+        /// The values of some keys, to run one command with
+        case resolve
+        /// How that command went, for the activity log
+        case finished
+    }
+
+    var action: Action
+    /// The folder the command runs in, for keys limited to some projects
+    var cwd: String
+    /// Who's asking, shown in the activity log, e.g. "Claude Code"
+    var client: String = "Claude Code"
+    var names: [String]? = nil
+    var command: String? = nil
+    var runID: String? = nil
+    var exitCode: Int32? = nil
+    var redactions: Int? = nil
+    var timedOut: Bool? = nil
+}
+
+/// A stored key as the helper sees it: everything but the value
+struct SecretSummary: Codable, Sendable, Equatable {
+    var name: String
+    var service: String?
+    var kind: String
+    var group: String?
+    var note: String?
+    /// Limited to some project folders
+    var restricted: Bool
+    /// Can be used from the folder in the request
+    var availableHere: Bool
+}
+
+struct BridgeReply: Codable, Sendable {
+    var ok: Bool
+    var error: String? = nil
+    var secrets: [SecretSummary]? = nil
+    var values: [String: String]? = nil
+    var runID: String? = nil
+
+    static func failure(_ message: String) -> BridgeReply { BridgeReply(ok: false, error: message) }
+}
+
+enum BridgeError: Error, CustomStringConvertible {
+    case unreachable
+    case io(String)
+    case badReply
+
+    var description: String {
+        switch self {
+        case .unreachable: return "KeyBar isn't running, and couldn't be started."
+        case .io(let detail): return "Couldn't talk to KeyBar (\(detail))."
+        case .badReply: return "KeyBar sent a reply that couldn't be read."
+        }
+    }
+}
+
+/// Socket plumbing both sides use
+enum BridgeSocket {
+    /// The most a request or reply may be, so nothing can make either side
+    /// read forever
+    static let maxMessage = 4 * 1024 * 1024
+
+    /// A sockaddr_un for `path`, or nil if the path is too long for one
+    static func address(_ path: String) -> sockaddr_un? {
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(path.utf8)
+        let capacity = MemoryLayout.size(ofValue: addr.sun_path)
+        guard bytes.count < capacity else { return nil }
+        withUnsafeMutableBytes(of: &addr.sun_path) { buffer in
+            buffer.copyBytes(from: bytes)
+            buffer[bytes.count] = 0
+        }
+        return addr
+    }
+
+    /// Sends one request to the app and waits for its reply
+    static func send(_ request: BridgeRequest, path: String = Bridge.socketPath,
+                     timeout: TimeInterval = Bridge.replyTimeout) throws -> BridgeReply {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw BridgeError.io("socket") }
+        defer { close(fd) }
+        guard var addr = address(path) else { throw BridgeError.io("socket path too long") }
+        let connected = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connected == 0 else { throw BridgeError.unreachable }
+        setTimeout(fd, timeout)
+
+        var data = try JSONEncoder().encode(request)
+        data.append(0x0A)
+        try writeAll(fd, data)
+        let line = try readLine(fd)
+        guard let reply = try? JSONDecoder().decode(BridgeReply.self, from: line) else { throw BridgeError.badReply }
+        return reply
+    }
+
+    static func setTimeout(_ fd: Int32, _ seconds: TimeInterval) {
+        var tv = timeval(tv_sec: Int(seconds), tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        // Don't die of SIGPIPE if the other side goes away mid-write
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+    }
+
+    static func writeAll(_ fd: Int32, _ data: Data) throws {
+        try data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
+            guard let base = buffer.baseAddress else { return }
+            var sent = 0
+            while sent < buffer.count {
+                let n = write(fd, base + sent, buffer.count - sent)
+                if n < 0 {
+                    if errno == EINTR { continue }
+                    throw BridgeError.io("write failed")
+                }
+                sent += n
+            }
+        }
+    }
+
+    /// Reads up to the first newline (not included)
+    static func readLine(_ fd: Int32) throws -> Data {
+        var result = Data()
+        var chunk = [UInt8](repeating: 0, count: 16 * 1024)
+        while true {
+            let n = read(fd, &chunk, chunk.count)
+            if n < 0 {
+                if errno == EINTR { continue }
+                throw BridgeError.io(errno == EAGAIN ? "timed out" : "read failed")
+            }
+            if n == 0 { break }
+            if let newline = chunk[0..<n].firstIndex(of: 0x0A) {
+                result.append(contentsOf: chunk[0..<newline])
+                return result
+            }
+            result.append(contentsOf: chunk[0..<n])
+            if result.count > maxMessage { throw BridgeError.io("message too long") }
+        }
+        guard !result.isEmpty else { throw BridgeError.io("connection closed") }
+        return result
+    }
+}

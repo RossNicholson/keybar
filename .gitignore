@@ -1,0 +1,9 @@
+.build/
+build/
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+# ExportOptions.plist is committed — CI needs it (no secrets in it)
