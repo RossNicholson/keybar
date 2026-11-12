@@ -75,6 +75,18 @@ final class ScannerTests: XCTestCase {
         XCTAssertFalse(KeyScanner.looksSecret(name: "PORT", value: "300000000"))
     }
 
+    /// Set SCAN_DIR to time a scan of a real folder. Prints names and where
+    /// they were found, never values.
+    func testScanARealFolder() throws {
+        guard let dir = ProcessInfo.processInfo.environment["SCAN_DIR"] else { throw XCTSkip("Set SCAN_DIR") }
+        let start = Date()
+        let everywhere = ProcessInfo.processInfo.environment["SCAN_ALL"] != nil
+        let found = KeyScanner(places: .init(folders: [URL(fileURLWithPath: dir)], shellProfiles: everywhere,
+                                             claudeCode: everywhere, toolCredentials: everywhere)).scan()
+        print("SCAN: \(found.count) found in \(String(format: "%.1f", Date().timeIntervalSince(start))) s")
+        for key in found { print("SCAN: \(key.name) · \(key.source.label)") }
+    }
+
     func testEnvFileNames() {
         for name in [".env", ".env.local", ".env.production", "production.env", ".envrc"] {
             XCTAssertTrue(KeyScanner.isEnvFile(name), name)

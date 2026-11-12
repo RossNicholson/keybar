@@ -53,6 +53,8 @@ struct KeyScanner: Sendable {
     static let skippedFolders: Set<String> = [
         "node_modules", "bower_components", "vendor", "Pods", "Carthage", "DerivedData", "build", "dist", "out",
         "target", "Library", "venv", "env", "site-packages", "__pycache__", "coverage", "tmp", "Temp", "Caches",
+        // Unity, Unreal and .NET build output
+        "Logs", "obj", "Intermediate", "Saved", "Binaries", "DerivedDataCache",
     ]
 
     /// Bundles that look like folders
