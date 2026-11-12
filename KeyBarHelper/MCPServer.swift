@@ -398,7 +398,60 @@ enum AppLink {
         CodeIdentity.peer(fd, meets: appRequirement)
     }
 
-    static func send(_ request: BridgeRequest, timeout: TimeInterval = Bridge.replyTimeout) throws -> BridgeReply {
+    static func send(_ request: BridgeRequest, timeout: TimeInterval = Bridge.replyTimeout,
+                     relaying: Bool = true) throws -> BridgeReply {
+        let reply = try sendOrLaunch(request, timeout: timeout)
+        // Turned away: KeyBar was most likely updated while this helper ran,
+        // so its file on disk is a new one the running copy no longer matches.
+        // A fresh copy of that file passes, so hand it the request.
+        guard relaying, reply.refused == true || reply.error == "KeyBar only answers its own signed helper." else { return reply }
+        if let relayed = relay(request, timeout: timeout), relayed.refused != true { return relayed }
+        return .failure("KeyBar was updated after this session started, and turned this older copy of its helper away. Reconnect KeyBar (/mcp in Claude Code) to fix it.")
+    }
+
+    /// Runs the request through `keybar relay`, a new process from the
+    /// helper's file as it is now
+    private static func relay(_ request: BridgeRequest, timeout: TimeInterval) -> BridgeReply? {
+        guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath(),
+              FileManager.default.isExecutableFile(atPath: executable.path),
+              let input = try? JSONEncoder().encode(request) else { return nil }
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = ["relay", String(Int(timeout))]
+        let stdin = Pipe(), stdout = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+        stdin.fileHandleForWriting.write(input)
+        try? stdin.fileHandleForWriting.close()
+        let output = stdout.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return try? JSONDecoder().decode(BridgeReply.self, from: output)
+    }
+
+    /// `keybar relay SECONDS`: one request from stdin, its reply to stdout
+    static func relayMain(_ arguments: [String]) -> Int32 {
+        let timeout = arguments.first.flatMap(TimeInterval.init) ?? Bridge.replyTimeout
+        let input = FileHandle.standardInput.readDataToEndOfFile()
+        let reply: BridgeReply
+        if let request = try? JSONDecoder().decode(BridgeRequest.self, from: input) {
+            do {
+                reply = try send(request, timeout: timeout, relaying: false)
+            } catch let error as BridgeError {
+                reply = .failure(error.description)
+            } catch {
+                reply = .failure(error.localizedDescription)
+            }
+        } else {
+            reply = .failure("KeyBar couldn't read the request.")
+        }
+        guard let data = try? JSONEncoder().encode(reply) else { return 1 }
+        FileHandle.standardOutput.write(data)
+        return 0
+    }
+
+    private static func sendOrLaunch(_ request: BridgeRequest, timeout: TimeInterval) throws -> BridgeReply {
         do {
             return try BridgeSocket.send(request, timeout: timeout, server: isKeyBar)
         } catch BridgeError.unreachable {

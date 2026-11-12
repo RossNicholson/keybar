@@ -132,6 +132,10 @@ struct BridgeReply: Codable, Sendable {
     var environment: [String: String]? = nil
     /// For `check`: file → the keys found in it
     var found: [String: [String]]? = nil
+    /// The app turned the caller away: it isn't KeyBar's signed helper. A
+    /// helper that's been running since before an update gets this, because
+    /// its file on disk has changed.
+    var refused: Bool? = nil
 
     static func failure(_ message: String) -> BridgeReply { BridgeReply(ok: false, error: message) }
 }

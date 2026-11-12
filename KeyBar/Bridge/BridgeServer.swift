@@ -67,7 +67,9 @@ final class BridgeServer: @unchecked Sendable {
         let line = try? BridgeSocket.readLine(client)
         let reply: BridgeReply
         if !callerIsHelper(client) {
-            reply = .failure("KeyBar only answers its own signed helper.")
+            var refusal = BridgeReply.failure("KeyBar only answers its own signed helper.")
+            refusal.refused = true
+            reply = refusal
         } else if let line, let request = try? JSONDecoder().decode(BridgeRequest.self, from: line) {
             reply = handler(request)
         } else {

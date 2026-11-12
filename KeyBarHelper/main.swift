@@ -15,6 +15,10 @@ case "run":
     TerminalRun.main(Array(CommandLine.arguments.dropFirst(2)))
 case "guard":
     CommitGuardCheck.main()
+case "relay":
+    // An older copy of this helper, turned away after an update, passes its
+    // request through this one. Not for people to run.
+    exit(AppLink.relayMain(Array(CommandLine.arguments.dropFirst(2))))
 case "--version", "version":
     print("keybar \(version)")
 default:

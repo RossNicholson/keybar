@@ -49,7 +49,7 @@ Homebrew 7 asks you to trust casks from other taps before installing them. On ol
 
 ### Updating
 
-**Settings → Check for updates → Update KeyBar** quits, updates and reopens it. Or run `brew upgrade --cask keybar`. Installed from the DMG instead, Check for updates opens the latest release's page.
+**Settings → Check for updates → Update KeyBar** quits, updates and reopens it. Or run `brew upgrade --cask keybar`. Installed from the DMG instead, Check for updates opens the latest release's page. Claude Code sessions that were open during an update keep working: their helper notices it's out of date and passes requests through the new one. (Sessions started before 1.4.2 need reconnecting once, with `/mcp`.)
 
 ## Connect Claude Code
 
