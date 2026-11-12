@@ -263,7 +263,7 @@ make screenshots  # renders the UI with demo keys into build/screenshots
 
 `make run` signs with a Developer ID so the app accepts its helper's signature. To build with your own certificate, change the team in `project.yml` and the Makefile: the app looks for its helper signed by the same team as itself.
 
-Built with SwiftUI and the shared [HouseStyle](https://github.com/RossNicholson/mac-house-style) package, like [BrewDock](https://github.com/RossNicholson/brewdock), [ClawdBar](https://github.com/RossNicholson/clawdbar) and [Mop Up](https://github.com/RossNicholson/mop-up).
+Built with SwiftUI and the shared [HouseStyle](https://github.com/RossNicholson/mac-house-style) package, like [BrewDock](https://github.com/RossNicholson/brewdock), [ClawdBar](https://github.com/RossNicholson/clawdbar), [Mop Up](https://github.com/RossNicholson/mop-up) and [Repo Radar](https://github.com/RossNicholson/reporadar).
 
 ## Licence
 
