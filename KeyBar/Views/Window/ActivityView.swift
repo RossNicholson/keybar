@@ -105,6 +105,9 @@ struct ActivityRow: View {
         case .deleted: return "trash.fill"
         case .imported: return "square.and.arrow.down.fill"
         case .deletedEverything: return "trash.fill"
+        case .sent: return "paperplane.fill"
+        case .requested: return "questionmark.bubble.fill"
+        case .tested: return "checkmark.seal.fill"
         }
     }
 

@@ -25,7 +25,11 @@ final class MCPServer: @unchecked Sendable {
     variable of that name, so refer to it as "$NAME" in the command. Never put a key's value in a command, and never \
     try to print, echo or save a key. Output comes back with any copy of a key replaced by [REDACTED]. \
     Don't run `keybar run` yourself: it's for the user's own terminal and doesn't hide keys. A .env line like \
-    NAME=keybar:STORED_NAME means the key is in KeyBar as STORED_NAME.
+    NAME=keybar:STORED_NAME means the key is in KeyBar as STORED_NAME. A key that's a file (marked "file" in \
+    list_secrets) is set as the path to a private copy of it, for tools that want a key file. If a key you need \
+    isn't stored, call request_secret: KeyBar asks the user to add it, and you never see it. To put a key into a \
+    GitHub repo's Actions secrets or a Cloudflare Worker's or Pages project's secrets, call send_secret rather \
+    than piping it into gh or wrangler yourself.
     """
 
     func run() {
@@ -154,6 +158,51 @@ final class MCPServer: @unchecked Sendable {
             ],
             "annotations": ["destructiveHint": true, "openWorldHint": true],
         ],
+        [
+            "name": "request_secret",
+            "title": "Ask the user to add a key",
+            "description": """
+            Asks the user to add a key KeyBar doesn't have yet: KeyBar opens its Add key window with the name \
+            filled in and your reason shown, and the user pastes the value there. Waits up to 5 minutes for them. \
+            You never see the value; once it's added, use it with run_with_secrets. Use this instead of asking the \
+            user to paste a key into the chat.
+            """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "name": ["type": "string", "description": "The name to store it as, also its environment variable, e.g. CLOUDFLARE_API_TOKEN."],
+                    "reason": ["type": "string", "description": "One short line for the user: what it's for and where to get it."],
+                ],
+                "required": ["name", "reason"],
+                "additionalProperties": false,
+            ],
+            "annotations": ["readOnlyHint": false, "destructiveHint": false, "openWorldHint": false],
+        ],
+        [
+            "name": "send_secret",
+            "title": "Send a key to GitHub or Cloudflare",
+            "description": """
+            Sends one stored key to a GitHub repository's Actions secrets (with gh), or a Cloudflare Worker's or \
+            Pages project's secrets (with wrangler), so a deploy can use it. KeyBar asks the user with Touch ID \
+            every time and sends it itself; the value never passes through you. Replaces a secret of the same name \
+            there.
+            """,
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "secretName": ["type": "string", "description": "The stored key to send (see list_secrets)."],
+                    "destination": [
+                        "type": "string", "enum": Destination.Kind.allCases.map(\.rawValue),
+                        "description": "githubActions, cloudflareWorker or cloudflarePages.",
+                    ],
+                    "target": ["type": "string", "description": "owner/repo for GitHub, else the Worker's or Pages project's name."],
+                    "nameThere": ["type": "string", "description": "The secret's name there. Defaults to secretName."],
+                ],
+                "required": ["secretName", "destination", "target"],
+                "additionalProperties": false,
+            ],
+            "annotations": ["destructiveHint": true, "openWorldHint": true],
+        ],
     ]
 
     func callTool(_ name: String, _ arguments: [String: Any], requestID: String = UUID().uuidString) -> [String: Any] {
@@ -162,6 +211,10 @@ final class MCPServer: @unchecked Sendable {
             return listSecrets()
         case "run_with_secrets":
             return runWithSecrets(arguments, requestID: requestID)
+        case "request_secret":
+            return requestSecret(arguments)
+        case "send_secret":
+            return sendSecret(arguments)
         default:
             return toolError("There's no tool called \(name).")
         }
@@ -195,9 +248,57 @@ final class MCPServer: @unchecked Sendable {
             if let group = secret.group { line += " [\(group)]" }
             if let note = secret.note, !note.isEmpty { line += " (\(note))" }
             if secret.restricted { line += secret.availableHere ? " (limited to some projects, including this one)" : " (not available in this folder)" }
+            if let fileName = secret.fileName { line += " (file \(fileName): $\(secret.name) is its path)" }
+            if let expires = secret.expiresAt {
+                line += expires < Date() ? " (EXPIRED \(Self.day(expires)), may not work)" : " (expires \(Self.day(expires)))"
+            }
             lines.append(line)
         }
         return toolText(lines.joined(separator: "\n"))
+    }
+
+    private static func day(_ date: Date) -> String {
+        date.formatted(.iso8601.year().month().day())
+    }
+
+    private func requestSecret(_ arguments: [String: Any]) -> [String: Any] {
+        let name = (arguments["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard SecretName.isValid(name) else {
+            return toolError("\"\(name)\" can't be a key name: letters, numbers and underscores, starting with a letter.")
+        }
+        let reason = String((arguments["reason"] as? String ?? "").prefix(300))
+        let reply: BridgeReply
+        do {
+            reply = try AppLink.send(BridgeRequest(action: .request, cwd: projectFolder, projectFolder: projectFolder,
+                                                   client: clientName, names: [name], reason: reason),
+                                     timeout: Bridge.requestTimeout + 10)
+        } catch {
+            return toolError("\(error)")
+        }
+        guard reply.ok else { return toolError(reply.error ?? "KeyBar refused.") }
+        return toolText(reply.message ?? "\(name) is in KeyBar now. Use it with run_with_secrets.")
+    }
+
+    private func sendSecret(_ arguments: [String: Any]) -> [String: Any] {
+        let name = arguments["secretName"] as? String ?? ""
+        guard SecretName.isValid(name) else { return toolError("\"\(name)\" isn't a key name. Use the names list_secrets gives.") }
+        guard let kind = Destination.Kind(rawValue: arguments["destination"] as? String ?? "") else {
+            return toolError("destination must be githubActions, cloudflareWorker or cloudflarePages.")
+        }
+        let nameThere = (arguments["nameThere"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? name
+        let destination = Destination(kind: kind, target: (arguments["target"] as? String ?? "").trimmingCharacters(in: .whitespaces),
+                                      secretName: nameThere)
+        if let problem = destination.problem { return toolError(problem) }
+        let reply: BridgeReply
+        do {
+            reply = try AppLink.send(BridgeRequest(action: .send, cwd: projectFolder, projectFolder: projectFolder,
+                                                   client: clientName, names: [name], destination: destination),
+                                     timeout: Bridge.resolveTimeout + 120)
+        } catch {
+            return toolError("\(error)")
+        }
+        guard reply.ok else { return toolError(reply.error ?? "KeyBar refused.") }
+        return toolText(reply.message ?? "Sent.")
     }
 
     private func runWithSecrets(_ arguments: [String: Any], requestID: String) -> [String: Any] {
@@ -240,12 +341,22 @@ final class MCPServer: @unchecked Sendable {
         // Only the keys asked for: nothing else gets into the environment
         // (BASH_ENV, PATH…), whatever the reply says
         let values = reported.filter { wanted.contains($0.key) }
+        let fileNames = reply.files ?? [:]
+        let keyFiles: KeyFiles
+        do {
+            keyFiles = try KeyFiles(values: values, files: fileNames)
+        } catch {
+            return toolError("Couldn't write the file keys for the command: \(error.localizedDescription)")
+        }
 
         let handle = CommandRunner.Handle()
         lock.withLock { running[requestID] = handle }
-        let result = CommandRunner.run(command, in: cwd, extraEnvironment: values, timeout: timeout, handle: handle)
+        let result = CommandRunner.run(command, in: cwd, extraEnvironment: keyFiles.environment(values),
+                                       timeout: timeout, handle: handle)
         lock.withLock { running[requestID] = nil }
-        let redactor = Redactor(secrets: Array(values.values))
+        keyFiles.remove()
+        let redactor = Redactor(secrets: values.flatMap { name, value in
+            fileNames[name] == nil ? [value] : KeyFiles.secretParts(of: value) })
         let stdout = redactor.redact(result.stdout)
         let stderr = redactor.redact(result.stderr)
         let redactions = stdout.count + stderr.count

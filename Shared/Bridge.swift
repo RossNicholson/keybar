@@ -22,6 +22,9 @@ enum Bridge {
     /// The longest we wait for the app to answer
     static let replyTimeout: TimeInterval = 30
 
+    /// How long the user has to add a key Claude asked for
+    static let requestTimeout: TimeInterval = 300
+
     /// How long the app leaves a Touch ID prompt up, and how long the helper
     /// waits for a reply when there might be one (a little longer)
     static let approvalTimeout: TimeInterval = 170
@@ -36,6 +39,11 @@ struct BridgeRequest: Codable, Sendable {
         case resolve
         /// How that command went, for the activity log
         case finished
+        /// Send one key to a GitHub repo or Cloudflare. The app sends it; the
+        /// helper never sees the value.
+        case send
+        /// Ask the user to add a key that isn't stored yet
+        case request
     }
 
     var action: Action
@@ -52,6 +60,10 @@ struct BridgeRequest: Codable, Sendable {
     var exitCode: Int32? = nil
     var redactions: Int? = nil
     var timedOut: Bool? = nil
+    /// For `send`
+    var destination: Destination? = nil
+    /// For `request`: why it's wanted, shown to the user
+    var reason: String? = nil
 }
 
 /// A stored key as the helper sees it: everything but the value
@@ -65,6 +77,9 @@ struct SecretSummary: Codable, Sendable, Equatable {
     var restricted: Bool
     /// Can be used from the folder in the request
     var availableHere: Bool
+    /// A key that's a whole file: commands get a path to it
+    var fileName: String? = nil
+    var expiresAt: Date? = nil
 }
 
 struct BridgeReply: Codable, Sendable {
@@ -72,7 +87,11 @@ struct BridgeReply: Codable, Sendable {
     var error: String? = nil
     var secrets: [SecretSummary]? = nil
     var values: [String: String]? = nil
+    /// Which of `values` are files, by key name: the file's name
+    var files: [String: String]? = nil
     var runID: String? = nil
+    /// What happened, for `send` and `request`
+    var message: String? = nil
 
     static func failure(_ message: String) -> BridgeReply { BridgeReply(ok: false, error: message) }
 }

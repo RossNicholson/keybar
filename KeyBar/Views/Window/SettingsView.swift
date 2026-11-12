@@ -29,6 +29,10 @@ struct SettingsView: View {
                 }
             })
 
+            SettingToggle(title: "Remind me before keys expire",
+                          detail: "A notification two weeks before a key's expiry date, and on the day. Set the date when you add or edit a key; Test fills it in for GitHub and Cloudflare tokens.",
+                          isOn: $settings.expiryReminders)
+
             SectionLabel(text: "Your other Macs")
             SettingToggle(title: "Sync with iCloud Keychain",
                           detail: state.canSync
@@ -41,6 +45,13 @@ struct SettingsView: View {
             .disabled(!state.canSync || state.isMovingKeys)
 
             SectionLabel(text: "App")
+            SettingToggle(title: "Quick copy \(GlobalHotKey.displayName)",
+                          detail: "Press \(GlobalHotKey.displayName) in any app, type a few letters of a key's name and press Return to copy it (after Touch ID). Esc closes it.",
+                          isOn: $settings.quickCopyShortcut) {
+                if settings.quickCopyShortcut && settings.shortcutTaken {
+                    SettingNote("Another app already uses \(GlobalHotKey.displayName), so it isn't available.")
+                }
+            }
             SettingToggle(title: "Show in the Dock", detail: "Off, KeyBar lives in the menu bar and only shows in the Dock while this window is open.",
                           isOn: $settings.showInDock)
             SettingToggle(title: "Dot when Claude Code is off",

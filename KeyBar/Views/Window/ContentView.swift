@@ -15,6 +15,11 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             state.claude.refresh()
         }
+        // A key Claude Code asked for
+        .sheet(item: Binding(get: { state.keyRequest }, set: { if $0 == nil, let open = state.keyRequest { state.answer(open) } })) { request in
+            AddKeyView(request: request) { state.answer(request) }
+                .environment(state)
+        }
     }
 
     @ViewBuilder private var detail: some View {

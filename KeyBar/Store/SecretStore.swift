@@ -17,8 +17,28 @@ struct SecretRecord: Codable, Identifiable, Hashable, Sendable {
     var archivedAt: Date?
     /// Where it goes in its group when ordered by hand; unordered keys follow, by name
     var position: Int?
+    /// Set for a key that's a whole file (a .json service account, a .p8):
+    /// the file's name. Commands get the path to a private copy of it.
+    var fileName: String?
+    /// When the key stops working, for a reminder beforehand
+    var expiresAt: Date?
+    /// Where it's been sent (GitHub Actions secrets, Cloudflare), so a new
+    /// value can be sent to the same places
+    var destinations: [Destination]?
 
     var id: String { name }
+    var isFile: Bool { fileName != nil }
+    var sentTo: [Destination] { destinations ?? [] }
+
+    /// Days until it expires (negative once it has), or nil without a date
+    func daysUntilExpiry(from now: Date = Date()) -> Int? {
+        guard let expiresAt else { return nil }
+        let calendar = Calendar.current
+        return calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: expiresAt)).day
+    }
+
+    /// Expired, or expiring within `KeyHealth.soonDays`
+    var expiresSoon: Bool { (daysUntilExpiry() ?? .max) <= KeyHealth.soonDays }
     var isArchived: Bool { archivedAt != nil }
     var service: Service? { ServiceCatalog.match(name) }
     var kind: String { CredentialKind.of(name) }
@@ -46,6 +66,9 @@ struct SyncedDetails: Codable, Equatable {
     var updatedAt: Date
     var archivedAt: Date?
     var position: Int?
+    var fileName: String?
+    var expiresAt: Date?
+    var destinations: [Destination]?
 
     init(_ record: SecretRecord) {
         group = record.group
@@ -55,6 +78,9 @@ struct SyncedDetails: Codable, Equatable {
         updatedAt = record.updatedAt
         archivedAt = record.archivedAt
         position = record.position
+        fileName = record.fileName
+        expiresAt = record.expiresAt
+        destinations = record.destinations
     }
 
     func apply(to record: inout SecretRecord) {
@@ -65,6 +91,9 @@ struct SyncedDetails: Codable, Equatable {
         record.updatedAt = updatedAt
         record.archivedAt = archivedAt
         record.position = position
+        record.fileName = fileName
+        record.expiresAt = expiresAt
+        record.destinations = destinations
     }
 
     var encoded: Data? {
@@ -218,7 +247,8 @@ final class SecretStore {
     // MARK: - Changing
 
     func add(name: String, value: String, group: String? = nil, note: String? = nil,
-             projectFolders: [String] = [], replacing: Bool = false) throws {
+             projectFolders: [String] = [], fileName: String? = nil, expiresAt: Date? = nil,
+             replacing: Bool = false) throws {
         guard SecretName.isValid(name) else { throw StoreError.invalidName(name) }
         guard !value.isEmpty else { throw StoreError.emptyValue }
         let group = group.map { existingGroup($0) ?? "" }
@@ -232,10 +262,13 @@ final class SecretStore {
             if let group { existing.group = group.nonEmpty }
             if let note { existing.note = note.nonEmpty }
             if !projectFolders.isEmpty { existing.projectFolders = projectFolders }
+            if let fileName { existing.fileName = fileName }
+            if let expiresAt { existing.expiresAt = expiresAt }
             replace(existing)
         } else {
             replace(SecretRecord(name: name, group: group?.nonEmpty, note: note?.nonEmpty,
-                                 projectFolders: projectFolders, createdAt: now, updatedAt: now))
+                                 projectFolders: projectFolders, createdAt: now, updatedAt: now,
+                                 fileName: fileName, expiresAt: expiresAt))
         }
         save()
     }
@@ -249,10 +282,12 @@ final class SecretStore {
         save()
     }
 
-    func replaceValue(_ name: String, with value: String) throws {
+    /// `fileName` set: the new value is that file's contents
+    func replaceValue(_ name: String, with value: String, fileName: String? = nil) throws {
         guard var record = record(name) else { throw StoreError.missing(name) }
         guard !value.isEmpty else { throw StoreError.emptyValue }
         try vault.write(name, value: value)
+        if let fileName { record.fileName = fileName }
         record.updatedAt = Date()
         replace(record)
         save()
@@ -337,6 +372,32 @@ final class SecretStore {
         }
         records = []
         forgotten = []
+        save()
+    }
+
+    /// Remembers that a key went to `destination`, replacing an earlier send
+    /// to the same place
+    func recordSend(_ name: String, to destination: Destination) {
+        guard var record = record(name) else { return }
+        var sent = record.sentTo.filter { !$0.samePlace(as: destination) }
+        sent.append(destination)
+        record.destinations = sent
+        replace(record)
+        save()
+    }
+
+    func forgetSend(_ name: String, _ destination: Destination) {
+        guard var record = record(name) else { return }
+        let sent = record.sentTo.filter { !$0.samePlace(as: destination) }
+        record.destinations = sent.isEmpty ? nil : sent
+        replace(record)
+        save()
+    }
+
+    func setExpiry(_ name: String, _ date: Date?) {
+        guard var record = record(name), record.expiresAt != date else { return }
+        record.expiresAt = date
+        replace(record)
         save()
     }
 

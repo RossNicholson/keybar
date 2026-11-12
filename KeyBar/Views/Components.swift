@@ -285,3 +285,126 @@ struct GroupSuggestions: View {
         }
     }
 }
+
+/// Reading a key that comes as a file
+enum KeyFile {
+    /// The most a file key may be: key files are small, and every command
+    /// that uses it gets a copy
+    static let maxBytes = 64 * 1024
+
+    enum Problem: LocalizedError {
+        case tooBig(String), notText(String), unreadable(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .tooBig(let name): return "\(name) is bigger than \(KeyFile.maxBytes / 1024) KB, too big for a key."
+            case .notText(let name): return "\(name) isn't a text file. Key files like .json, .pem and .p8 are text."
+            case .unreadable(let name): return "Couldn't read \(name)."
+            }
+        }
+    }
+
+    /// Asks for a file; nil if the user cancelled
+    @MainActor
+    static func choose(title: String) -> Result<(String, String), Problem>? {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.prompt = "Choose"
+        panel.message = "A key file such as a service account .json or an Apple .p8. KeyBar keeps a copy in your Keychain."
+        panel.showsHiddenFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return read(url)
+    }
+
+    static func read(_ url: URL) -> Result<(String, String), Problem> {
+        let name = url.lastPathComponent
+        guard let data = try? Data(contentsOf: url) else { return .failure(.unreadable(name)) }
+        guard data.count <= maxBytes else { return .failure(.tooBig(name)) }
+        guard let text = String(data: data, encoding: .utf8), !text.isEmpty, !text.contains("\0") else { return .failure(.notText(name)) }
+        return .success((name, text))
+    }
+}
+
+/// Stands in for the value field when the key is a file
+struct FileValueRow: View {
+    let fileName: String
+    /// nil when it isn't known without reading the Keychain
+    var size: Int? = nil
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc.text.fill").foregroundStyle(AppColors.secondaryText)
+            Text(fileName)
+                .font(.mono(11, weight: .semibold))
+                .foregroundStyle(AppColors.text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+            if let size {
+                Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                    .font(.mono(9.5))
+                    .foregroundStyle(AppColors.secondaryText)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(AppColors.surface, in: RoundedRectangle(cornerRadius: Radius.small, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.small, style: .continuous).strokeBorder(AppColors.hairline))
+    }
+}
+
+/// "Expires" with a date, for a reminder before a key stops working
+struct ExpiryField: View {
+    @Binding var on: Bool
+    @Binding var date: Date
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Toggle(isOn: $on) {
+                FieldLabel(text: "Expires", detail: on ? "KeyBar reminds you 2 weeks before" : "optional")
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .tint(AppColors.toggle)
+            Spacer()
+            if on {
+                DatePicker("", selection: $date, displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.field)
+                    .fixedSize()
+            }
+        }
+    }
+}
+
+/// A slim card above the key list for keys that need looking at
+struct AttentionBanner<Actions: View>: View {
+    let symbol: String
+    let title: String
+    let message: String
+    let fill: Color
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            SymbolTile(symbol: symbol, fill: .white.opacity(0.55), size: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.display(16, relativeTo: .headline))
+                    .textCase(.uppercase)
+                    .foregroundStyle(AppColors.ink)
+                Text(message)
+                    .font(.mono(10))
+                    .foregroundStyle(AppColors.ink.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) { actions }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(fill, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
+    }
+}

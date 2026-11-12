@@ -5,6 +5,9 @@ import SwiftUI
 struct AddKeyView: View {
     @Environment(AppState.self) private var state
     var compact = false
+    /// Set when Claude Code asked for this key: its name is filled in and
+    /// its reason shown
+    var request: KeyRequest? = nil
     let done: () -> Void
 
     @State private var name = ""
@@ -14,6 +17,10 @@ struct AddKeyView: View {
     @State private var error: String?
     /// The name was filled in from the value's shape, not typed
     @State private var suggestedName = false
+    /// The value is this file's contents
+    @State private var fileName: String?
+    @State private var expires = false
+    @State private var expiresAt = Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now
 
     private var finalName: String { SecretName.isValid(name) ? name : SecretName.normalized(name) }
     private var preview: SecretRecord? {
@@ -25,8 +32,24 @@ struct AddKeyView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
-                PopoverHeader(title: "Add a key", subtitle: "Stored in your Keychain. Claude Code uses it by name, never by value.")
+                PopoverHeader(title: request == nil ? "Add a key" : "\(request!.client) asks for a key",
+                              subtitle: "Stored in your Keychain. Claude Code uses it by name, never by value.")
                 if !compact { Mascot(size: 48) }
+            }
+            if let request {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(request.reason.isEmpty ? "It needs \(request.name)." : request.reason)
+                        .font(.mono(10.5))
+                        .foregroundStyle(AppColors.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Paste it below. It goes straight into your Keychain; Claude never sees it.")
+                        .font(.mono(9.5))
+                        .foregroundStyle(AppColors.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppColors.butter.opacity(0.55), in: RoundedRectangle(cornerRadius: Radius.small, style: .continuous))
             }
 
             VStack(alignment: .leading, spacing: 5) {
@@ -51,9 +74,25 @@ struct AddKeyView: View {
             }
 
             VStack(alignment: .leading, spacing: 5) {
-                FieldLabel(text: "Value")
-                HouseField(placeholder: "Paste the key", text: $value, secure: true, onSubmit: save)
-                    .onChange(of: value) { _, pasted in suggestName(for: pasted) }
+                HStack {
+                    FieldLabel(text: "Value", detail: fileName == nil ? nil : "a file")
+                    Spacer()
+                    if !compact {
+                        Button(fileName == nil ? "Or choose a file…" : "Paste instead") {
+                            if fileName == nil { chooseFile() } else { fileName = nil; value = "" }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.mono(9.5, weight: .semibold))
+                        .foregroundStyle(AppColors.text)
+                        .help("For keys that come as a file, like a .json service account or a .p8")
+                    }
+                }
+                if let fileName {
+                    FileValueRow(fileName: fileName, size: value.utf8.count)
+                } else {
+                    HouseField(placeholder: "Paste the key", text: $value, secure: true, onSubmit: save)
+                        .onChange(of: value) { _, pasted in suggestName(for: pasted) }
+                }
             }
 
             if !compact {
@@ -70,6 +109,10 @@ struct AddKeyView: View {
                 }
             }
 
+            if !compact {
+                ExpiryField(on: $expires, date: $expiresAt)
+            }
+
             if let error {
                 SettingNote(error)
             }
@@ -84,6 +127,22 @@ struct AddKeyView: View {
             }
         }
         .popoverChrome(width: compact ? 300 : 460)
+        .onAppear {
+            if let request, name.isEmpty { name = request.name }
+        }
+    }
+
+    private func chooseFile() {
+        error = nil
+        guard let file = KeyFile.choose(title: "Choose a key file") else { return }
+        switch file {
+        case .success(let (fileName, contents)):
+            self.fileName = fileName
+            value = contents
+            if name.isEmpty { name = SecretName.normalized((fileName as NSString).deletingPathExtension) }
+        case .failure(let problem):
+            error = problem.localizedDescription
+        }
     }
 
     /// "NAME=value" pasted into the name field fills both fields
@@ -102,8 +161,9 @@ struct AddKeyView: View {
     private func save() {
         guard canSave else { return }
         do {
-            try state.add(name: finalName, value: value.trimmingCharacters(in: .whitespacesAndNewlines),
-                          group: group, note: note)
+            // A file is kept exactly as it is; a pasted key loses stray spaces
+            try state.add(name: finalName, value: fileName == nil ? value.trimmingCharacters(in: .whitespacesAndNewlines) : value,
+                          group: group, note: note, fileName: fileName, expiresAt: expires ? expiresAt : nil)
             done()
         } catch {
             self.error = error.localizedDescription

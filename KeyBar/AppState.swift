@@ -64,6 +64,8 @@ final class AppState {
     private(set) var syncNote: String?
     private(set) var isMovingKeys = false
     @ObservationIgnored private var refreshTimer: Timer?
+    @ObservationIgnored private var reminderTimer: Timer?
+    @ObservationIgnored private(set) var reminders: ExpiryReminders?
 
     init(store: SecretStore, log: ActivityLog, claude: ClaudeConnector) {
         self.store = store
@@ -75,6 +77,11 @@ final class AppState {
             store.live?.syncs = false
             settings.syncWithICloud = false
             store.refresh()
+        }
+        reminders = ExpiryReminders(store: store, settings: settings)
+        reminders?.check()
+        reminderTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reminders?.check() }
         }
         // Other Macs' changes arrive in iCloud Keychain without telling us
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -137,9 +144,14 @@ final class AppState {
 
     // MARK: - Changing keys
 
-    func add(name: String, value: String, group: String?, note: String?, projectFolders: [String] = []) throws {
-        try store.add(name: name, value: value, group: group, note: note, projectFolders: projectFolders)
-        log.log(.added, [name])
+    func add(name: String, value: String, group: String?, note: String?, projectFolders: [String] = [],
+             fileName: String? = nil, expiresAt: Date? = nil) throws {
+        try store.add(name: name, value: value, group: group, note: note, projectFolders: projectFolders,
+                      fileName: fileName, expiresAt: expiresAt)
+        log.log(.added, [name], detail: fileName.map { "File \($0)" })
+        if expiresAt != nil { ExpiryReminders.askPermission() }
+        // A key Claude asked for is answered
+        if let request = keyRequest, request.name == name { answer(request) }
     }
 
     func delete(_ name: String) throws {
@@ -170,10 +182,95 @@ final class AppState {
         log.log(.renamed, [newName], detail: "Was \(name)")
     }
 
-    func replaceValue(_ name: String, with value: String) throws {
-        try store.replaceValue(name, with: value)
+    func replaceValue(_ name: String, with value: String, fileName: String? = nil) throws {
+        try store.replaceValue(name, with: value, fileName: fileName)
         revealed[name] = nil
-        log.log(.changed, [name], detail: "New value")
+        log.log(.changed, [name], detail: fileName.map { "New file \($0)" } ?? "New value")
+    }
+
+    func setExpiry(_ name: String, _ date: Date?) {
+        guard store.record(name)?.expiresAt != date else { return }
+        store.setExpiry(name, date)
+        log.log(.changed, [name], detail: date.map { "Expires \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "No expiry date")
+        if date != nil { ExpiryReminders.askPermission() }
+        reminders?.check()
+    }
+
+    // MARK: - Sending keys
+
+    /// Sends a key to GitHub or Cloudflare, after Touch ID (always: it leaves
+    /// the Mac). Returns what happened, for showing.
+    func send(_ name: String, to destination: Destination) async -> Result<String, Error> {
+        guard await OwnerCheck.confirm("send \(name) to \(destination.label)", required: !isDemo) else {
+            return .failure(Sender.Failure.failed("Not sent: Touch ID wasn't confirmed."))
+        }
+        return await sendConfirmed(name, to: destination, source: .you)
+    }
+
+    /// The sending itself, once the user has said yes
+    func sendConfirmed(_ name: String, to destination: Destination, source: ActivityEntry.Source,
+                       client: String? = nil) async -> Result<String, Error> {
+        let value: String
+        do {
+            value = try store.value(name)
+        } catch {
+            return .failure(error)
+        }
+        let result: Result<String, Error> = isDemo
+            ? .success("\(destination.secretName) would be sent to \(destination.label) (demo).")
+            : await Task.detached { Result { try Sender.send(value, to: destination) } }.value
+        switch result {
+        case .success:
+            var sent = destination
+            sent.sentAt = Date()
+            store.recordSend(name, to: sent)
+            log.add(ActivityEntry(action: .sent, source: source, names: [name],
+                                  detail: "To \(destination.label) as \(destination.secretName)", client: client))
+        case .failure(let error):
+            log.add(ActivityEntry(action: .refused, source: source, names: [name],
+                                  detail: "Sending to \(destination.label) failed: \(error.localizedDescription)", client: client))
+        }
+        return result
+    }
+
+    // MARK: - Testing keys
+
+    /// Asks the key's service whether it works; fills in the expiry date if
+    /// the service gives one and the key hasn't got one
+    func test(_ name: String) async -> KeyTester.Result? {
+        guard let record = store.record(name), let value = try? store.value(name) else { return nil }
+        guard let result = await KeyTester.test(record, value: value) else { return nil }
+        log.log(.tested, [name], detail: result.summary)
+        if let expires = result.expiresAt, store.record(name)?.expiresAt == nil {
+            setExpiry(name, expires)
+        }
+        return result
+    }
+
+    // MARK: - Keys Claude asks for
+
+    /// A key Claude Code asked the user to add, while the Add window is up
+    private(set) var keyRequest: KeyRequest?
+
+    /// Shows the Add window for a key Claude asked for. nil if one is
+    /// already showing.
+    func ask(name: String, reason: String, client: String) -> KeyRequest? {
+        guard keyRequest == nil else { return nil }
+        let request = KeyRequest(name: name, reason: reason, client: client)
+        keyRequest = request
+        log.add(ActivityEntry(action: .requested, source: client == "Claude Code" ? .claudeCode : .other, names: [name],
+                              detail: reason.isEmpty ? nil : reason, client: client == "Claude Code" ? nil : client))
+        section = .keys
+        openWindow?(.keys)
+        NSApp.activate()
+        return request
+    }
+
+    /// The Add window for a request closed, with or without the key
+    func answer(_ request: KeyRequest) {
+        guard keyRequest?.id == request.id else { return }
+        keyRequest = nil
+        request.answered.signal()
     }
 
     func importEntries(_ entries: [EnvFile.Entry], group: String?, from file: String) throws -> Int {
@@ -368,6 +465,27 @@ final class AppSettings {
 
     nonisolated static let syncKey = "syncWithICloud"
 
+    /// Notifications before a key's expiry date
+    var expiryReminders: Bool = UserDefaults.standard.object(forKey: "expiryReminders") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(expiryReminders, forKey: "expiryReminders") }
+    }
+
+    /// ⌥⌘K opens quick copy from any app
+    var quickCopyShortcut: Bool = UserDefaults.standard.object(forKey: "quickCopyShortcut") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(quickCopyShortcut, forKey: "quickCopyShortcut")
+            onChange?()
+        }
+    }
+
+    /// Another app already has ⌥⌘K
+    var shortcutTaken = false
+
+    /// Unused keys the user chose to keep, so they're not offered again
+    var keptUnused: [String] = UserDefaults.standard.stringArray(forKey: "keptUnused") ?? [] {
+        didSet { UserDefaults.standard.set(keptUnused, forKey: "keptUnused") }
+    }
+
     /// Whether keys live in iCloud Keychain. Changed with AppState.setSync,
     /// which moves the keys.
     var syncWithICloud: Bool = UserDefaults.standard.bool(forKey: AppSettings.syncKey) {
@@ -421,5 +539,21 @@ final class AppSettings {
             loginError = "Allow KeyBar in System Settings → General → Login Items."
             SMAppService.openSystemSettingsLoginItems()
         }
+    }
+}
+
+/// A key Claude Code asked for: the bridge waits on `answered` while the
+/// user adds it (or doesn't)
+final class KeyRequest: Identifiable, @unchecked Sendable {
+    let id = UUID()
+    let name: String
+    let reason: String
+    let client: String
+    let answered = DispatchSemaphore(value: 0)
+
+    init(name: String, reason: String, client: String) {
+        self.name = name
+        self.reason = reason
+        self.client = client
     }
 }

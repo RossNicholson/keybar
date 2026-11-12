@@ -61,12 +61,20 @@ enum TerminalRun {
         for (name, value) in plan.plain where environment[name] == nil {
             environment[name] = value
         }
+        let keyFiles: KeyFiles
+        do {
+            keyFiles = try KeyFiles(values: values, files: reply.files ?? [:])
+        } catch {
+            fail("Couldn't write the file keys: \(error.localizedDescription)", code: 77)
+        }
+        let given = keyFiles.environment(values)
         for (variable, stored) in plan.keys {
-            guard let value = values[stored] else { fail("KeyBar didn't send \(stored).", code: 77) }
+            guard let value = given[stored] else { fail("KeyBar didn't send \(stored).", code: 77) }
             environment[variable] = value
         }
 
         let status = spawn(plan.command, environment: environment)
+        keyFiles.remove()
         _ = try? AppLink.send(BridgeRequest(action: .finished, cwd: folder, client: Bridge.terminalClient,
                                             runID: reply.runID, exitCode: status), timeout: 5)
         exit(status)
