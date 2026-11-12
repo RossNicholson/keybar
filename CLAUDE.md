@@ -71,6 +71,8 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
     Merge and push it to main right before releasing (CI only bumps an existing cask).
   - Website: local branch `keybar` in /Volumes/t7ssd/Dev/RossNicholsonWebsite (keybar.html, keybar.css,
     images/keybar, home card, privacy, terms, support, sitemap). Merge to main after the release is out.
+  - BrewDock: local branch `add-keybar` in /Volumes/t7ssd/Dev/brewdock lists KeyBar in Discover's
+    "From the maker of BrewDock" (bundled KeyBarIcon). Merge, then ship it in the next BrewDock release.
   - The repo has no CI secrets yet. Auto mode blocked disabling the workflow and a local notarised
     build, so the release needs Ross: add the six secrets, then `make release VERSION=1.0.0`.
   - After release: add KeyBar to HouseStyle "More apps", connect Ross's real Claude Code from the
