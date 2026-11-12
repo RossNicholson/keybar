@@ -27,6 +27,8 @@ struct ContentView: View {
         case .keys: KeysView()
         case .activity: ActivityView()
         case .claudeCode: ClaudeCodeView()
+        case .leaks: LeakCheckView()
+        case .devTools: DevToolsView()
         case .settings: SettingsView()
         }
     }
@@ -102,6 +104,13 @@ private struct SidebarRow: View {
                 .font(.mono(10, weight: .semibold))
                 .foregroundStyle(selected ? AppColors.onSolid : AppColors.secondaryText)
                 .padding(.trailing, 6)
+        case .leaks where !state.visibleLeaks.isEmpty:
+            Text("\(Set(state.visibleLeaks.map(\.name)).count)")
+                .font(.mono(10, weight: .semibold))
+                .foregroundStyle(AppColors.ink)
+                .padding(.horizontal, 6)
+                .background(AppColors.coral, in: Capsule())
+                .padding(.trailing, 4)
         case .claudeCode where state.claude.status != .connected:
             Circle().fill(AppColors.coral).frame(width: 8, height: 8).padding(.trailing, 8)
                 .help("Not connected")

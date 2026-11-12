@@ -123,7 +123,7 @@ private struct DangerZone: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             SettingLabel(title: "Delete everything",
-                         detail: "Removes all \(state.store.records.count) keys from your Keychain\(state.store.syncs ? " and from iCloud Keychain, so from all your Macs" : ""), clears the activity log and disconnects Claude Code. This can't be undone.")
+                         detail: "Removes all \(state.store.records.count) keys from your Keychain\(state.store.syncs ? " and from iCloud Keychain, so from all your Macs" : ""), clears the activity log, disconnects Claude Code and other AI apps, and turns off the commit guard. This can't be undone.")
             HStack {
                 ConfirmButton(title: "Delete everything", confirmTitle: "Really delete all keys?") {
                     Task {

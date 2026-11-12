@@ -11,8 +11,9 @@ enum TerminalRun {
     Usage:
       keybar run [options] -- COMMAND [ARGS...]
 
-    Keys come from NAME=keybar:STORED_NAME lines in ./.env, and from --key.
-    Other lines in the .env are set too, unless they're set already.
+    Keys come from NAME=keybar:STORED_NAME lines in ./.env, the names in the
+    project's .keybar file, and --key. Other lines in the .env are set too,
+    unless they're set already.
 
     Options:
       -k, --key NAME            Set the stored key NAME as $NAME
@@ -67,6 +68,7 @@ enum TerminalRun {
         } catch {
             fail("Couldn't write the file keys: \(error.localizedDescription)", code: 77)
         }
+        for (name, value) in Bridge.proxyEnvironment(reply.environment) { environment[name] = value }
         let given = keyFiles.environment(values)
         for (variable, stored) in plan.keys {
             guard let value = given[stored] else { fail("KeyBar didn't send \(stored).", code: 77) }

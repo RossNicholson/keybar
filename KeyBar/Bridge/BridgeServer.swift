@@ -91,6 +91,7 @@ final class BridgePolicy {
     private let store: SecretStore
     private let log: ActivityLog
     private let settings: AppSettings?
+    private let proxy: KeyProxy?
     /// Runs waiting for their "finished" report: run ID → log entry
     private var running: [String: String] = [:]
     /// When the user last approved each kind of use with Touch ID, keyed by
@@ -100,10 +101,11 @@ final class BridgePolicy {
     /// Values shorter than this aren't looked for in commands: too likely to match by chance
     static let literalCheckLength = 8
 
-    init(store: SecretStore, log: ActivityLog, settings: AppSettings? = nil) {
+    init(store: SecretStore, log: ActivityLog, settings: AppSettings? = nil, proxy: KeyProxy? = nil) {
         self.store = store
         self.log = log
         self.settings = settings
+        self.proxy = proxy
     }
 
     func handle(_ request: BridgeRequest) -> BridgeReply {
@@ -113,6 +115,7 @@ final class BridgePolicy {
         case .list: return list(request)
         case .resolve: return resolve(request)
         case .finished: return finished(request)
+        case .check: return check(request)
         // The app delegate runs these: they wait on the user, off the main thread
         case .send, .request: return .failure("KeyBar couldn't handle that request.")
         }
@@ -138,15 +141,38 @@ final class BridgePolicy {
         record.isAvailable(in: request.cwd) && (request.projectFolder.map { record.isAvailable(in: $0) } ?? true)
     }
 
+    // MARK: - Project lists
+
+    /// The .keybar lists that apply: the project's and the command folder's
+    func projectLists(for request: BridgeRequest) -> [ProjectKeys] {
+        var lists: [ProjectKeys] = []
+        for folder in [request.projectFolder, request.cwd].compactMap({ $0 }) {
+            if let list = ProjectKeys.find(from: folder), !lists.contains(list) { lists.append(list) }
+        }
+        return lists
+    }
+
+    /// The list that leaves `name` out, if one does
+    private func listWithout(_ name: String, in lists: [ProjectKeys]) -> ProjectKeys? {
+        lists.first { !$0.names.contains(name) }
+    }
+
     private func list(_ request: BridgeRequest) -> BridgeReply {
-        // Archived keys are filed away: Claude doesn't see them
-        let secrets = store.active.map { record in
+        let lists = projectLists(for: request)
+        // Archived keys are filed away, and a project's .keybar narrows it
+        // further: Claude doesn't see the others
+        let shown = store.active.filter { listWithout($0.name, in: lists) == nil }
+        let secrets = shown.map { record in
             SecretSummary(name: record.name, service: record.service?.name, kind: record.kind,
                           group: record.group, note: record.note, restricted: record.isRestricted,
                           availableHere: isAvailable(record, for: request), fileName: record.fileName,
-                          expiresAt: record.expiresAt)
+                          expiresAt: record.expiresAt, proxyVariable: record.usesProxy ? KeyProxy.route(for: record)?.variable : nil)
         }
-        return BridgeReply(ok: true, secrets: secrets)
+        let hidden = store.active.count - shown.count
+        let message = lists.isEmpty || hidden == 0 ? nil
+            : "\(lists.map { Self.tidy($0.path) }.joined(separator: " and ")) lists the keys this project uses, so \(hidden) other "
+            + "key\(hidden == 1 ? " is" : "s are") hidden here."
+        return BridgeReply(ok: true, secrets: secrets, message: message)
     }
 
     // MARK: - Approval
@@ -166,7 +192,8 @@ final class BridgePolicy {
                 + (destination.secretName == name ? "" : " as \(destination.secretName)")
         }
         guard request.action == .resolve, let settings, problem(with: request) == nil else { return nil }
-        let seconds = Self.approvalSeconds(for: request, setting: settings.approvalSeconds)
+        let seconds = Self.approvalSeconds(for: request, setting: settings.approvalSeconds,
+                                           keys: (request.names ?? []).compactMap { store.record($0)?.approval })
         guard seconds != 0 else { return nil }
         if seconds > 0, let approved = approvals[Self.approvalScope(request)],
            Date().timeIntervalSince(approved) < seconds {
@@ -189,7 +216,15 @@ final class BridgePolicy {
     /// How long one approval lasts. `keybar run` always asks (15 minutes at
     /// most): its output isn't redacted, so "never" would let any program
     /// running as you print every key with it.
-    static func approvalSeconds(for request: BridgeRequest, setting: TimeInterval) -> TimeInterval {
+    /// A key set to ask every time always asks; if every key is set never to
+    /// ask, it doesn't (except for `keybar run`)
+    static func approvalSeconds(for request: BridgeRequest, setting: TimeInterval, keys: [KeyApproval] = []) -> TimeInterval {
+        var setting = setting
+        if keys.contains(.everyTime) {
+            setting = -1
+        } else if !keys.isEmpty && keys.count == (request.names ?? []).count && keys.allSatisfy({ $0 == .never }) {
+            setting = 0
+        }
         guard request.client == Bridge.terminalClient, setting == 0 else { return setting }
         return 900
     }
@@ -237,7 +272,12 @@ final class BridgePolicy {
             return Problem(message: "\(archived.joined(separator: ", ")) \(archived.count == 1 ? "is" : "are") archived in KeyBar. "
                 + "Ask the user to restore \(archived.count == 1 ? "it" : "them") if needed.")
         }
+        let lists = projectLists(for: request)
         for name in names {
+            if let list = listWithout(name, in: lists) {
+                return Problem(message: "\(name) isn't in \(Self.tidy(list.path)), the list of keys this project uses, so it can't "
+                    + "be used here. Ask the user to add it to that file if the project needs it.")
+            }
             guard let record = store.record(name), isAvailable(record, for: request) else {
                 let folders = store.record(name)?.projectFolders.map(Self.tidy).joined(separator: ", ") ?? "some folders"
                 let here = Self.tidy(request.projectFolder ?? request.cwd)
@@ -275,9 +315,22 @@ final class BridgePolicy {
         }
         store.markUsed(names)
         let runID = UUID().uuidString
+        // Proxied keys: the command gets a placeholder and a local address,
+        // and KeyBar adds the key to its requests
+        var environment: [String: String] = [:]
+        if let proxy {
+            for name in names {
+                guard let record = store.record(name), record.usesProxy, let route = KeyProxy.route(for: record),
+                      environment[route.variable] == nil, let value = values[name],
+                      let base = proxy.grant(name: name, value: value, route: route, runID: runID) else { continue }
+                environment[route.variable] = base
+                values[name] = Bridge.proxyPlaceholder
+            }
+        }
         running[runID] = log.add(entry(.ran, request, detail: "Running…"))
         let files = Dictionary(uniqueKeysWithValues: names.compactMap { name in store.record(name)?.fileName.map { (name, $0) } })
-        return BridgeReply(ok: true, values: values, files: files.isEmpty ? nil : files, runID: runID)
+        return BridgeReply(ok: true, values: values, files: files.isEmpty ? nil : files, runID: runID,
+                           environment: environment.isEmpty ? nil : environment)
     }
 
     // MARK: - Sending keys
@@ -312,13 +365,38 @@ final class BridgePolicy {
     }
 
     private func finished(_ request: BridgeRequest) -> BridgeReply {
-        guard let runID = request.runID, let entry = running.removeValue(forKey: runID) else { return BridgeReply(ok: true) }
+        guard let runID = request.runID else { return BridgeReply(ok: true) }
+        let proxied = proxy?.revoke(runID: runID) ?? 0
+        guard let entry = running.removeValue(forKey: runID) else { return BridgeReply(ok: true) }
         var detail = request.timedOut == true ? "Timed out" : "Exit \(request.exitCode ?? 0)"
         if let hidden = request.redactions, hidden > 0 {
             detail += " · \(hidden) cop\(hidden == 1 ? "y" : "ies") hidden"
         }
+        if proxied > 0 { detail += " · \(proxied) request\(proxied == 1 ? "" : "s") through KeyBar" }
         log.update(entry, detail: detail)
         return BridgeReply(ok: true)
+    }
+
+    // MARK: - The commit guard
+
+    /// Which stored keys are in each file's staged changes. Only names go
+    /// back, and only for whole values (or a file key's long secret parts).
+    private func check(_ request: BridgeRequest) -> BridgeReply {
+        let watched = Needles.all(in: store)
+        var found: [String: [String]] = [:]
+        for (file, text) in request.texts ?? [:] {
+            let data = Data(text.utf8)
+            let names = watched.filter { item in item.needles.contains { LeakScanner.occurrences(of: $0, in: data) > 0 } }.map(\.name)
+            if !names.isEmpty { found[file] = names.sorted() }
+        }
+        if !found.isEmpty {
+            let files = found.keys.sorted()
+            log.add(ActivityEntry(action: .stopped, source: source(request), names: Array(Set(found.values.joined())).sorted(),
+                                  program: "git commit", folder: request.cwd,
+                                  detail: "In \(files.prefix(3).joined(separator: ", "))\(files.count > 3 ? " and \(files.count - 3) more" : "")",
+                                  client: source(request) == .other ? request.client : nil))
+        }
+        return BridgeReply(ok: true, found: found)
     }
 
     /// ~/Dev/Project instead of /Users/name/Dev/Project

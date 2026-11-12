@@ -4,7 +4,7 @@ import ServiceManagement
 import SwiftUI
 
 enum AppSection: String, CaseIterable, Identifiable {
-    case keys, activity, claudeCode, settings
+    case keys, activity, claudeCode, leaks, devTools, settings
 
     var id: String { rawValue }
 
@@ -13,6 +13,8 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .keys: return "Keys"
         case .activity: return "Activity"
         case .claudeCode: return "Claude Code"
+        case .leaks: return "Leak check"
+        case .devTools: return "Dev tools"
         case .settings: return "Settings"
         }
     }
@@ -22,6 +24,8 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .keys: return "key.fill"
         case .activity: return "clock.arrow.circlepath"
         case .claudeCode: return "terminal.fill"
+        case .leaks: return "exclamationmark.shield.fill"
+        case .devTools: return "wrench.and.screwdriver.fill"
         case .settings: return "gearshape.fill"
         }
     }
@@ -31,6 +35,8 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .keys: return AppColors.butter
         case .activity: return AppColors.mint
         case .claudeCode: return AppColors.peach
+        case .leaks: return AppColors.coral
+        case .devTools: return AppColors.periwinkle
         case .settings: return AppColors.lilac
         }
     }
@@ -43,7 +49,14 @@ final class AppState {
     let store: SecretStore
     let log: ActivityLog
     let settings = AppSettings()
+    /// Adds keys to AI API requests for commands using proxied keys
+    let proxy = KeyProxy()
     let claude: ClaudeConnector
+    /// Cursor, Codex and the other AI apps KeyBar can connect
+    let aiApps: AIApps
+    @ObservationIgnored var commitGuard = CommitGuard()
+    private(set) var guardStatus: CommitGuard.Status = .off
+    private(set) var guardNote: String?
     @ObservationIgnored let updater = SelfUpdater(app: .keyBar)
 
     var section: AppSection = .keys
@@ -67,10 +80,11 @@ final class AppState {
     @ObservationIgnored private var reminderTimer: Timer?
     @ObservationIgnored private(set) var reminders: ExpiryReminders?
 
-    init(store: SecretStore, log: ActivityLog, claude: ClaudeConnector) {
+    init(store: SecretStore, log: ActivityLog, claude: ClaudeConnector, aiApps: AIApps? = nil) {
         self.store = store
         self.log = log
         self.claude = claude
+        self.aiApps = aiApps ?? AIApps()
         canSync = store.live?.iCloudAvailable ?? false
         // A build that can't reach iCloud Keychain uses this Mac's keys
         if store.syncs && !canSync {
@@ -247,6 +261,116 @@ final class AppState {
         return result
     }
 
+    // MARK: - Per-key rules
+
+    func setApproval(_ name: String, _ approval: KeyApproval?) {
+        guard var record = store.record(name), record.approval != approval else { return }
+        record.approval = approval
+        store.update(record)
+        let detail = switch approval {
+        case .everyTime: "Touch ID for every use"
+        case .never: "No Touch ID for commands"
+        case nil: "Touch ID as in Settings"
+        }
+        log.log(.changed, [name], detail: detail)
+    }
+
+    func setProxied(_ name: String, _ on: Bool) {
+        guard var record = store.record(name), (record.proxied == true) != on else { return }
+        record.proxied = on ? true : nil
+        store.update(record)
+        log.log(.changed, [name], detail: on ? "Used through KeyBar's proxy" : "Given to commands directly")
+    }
+
+    // MARK: - Rotating keys
+
+    /// Swaps in a new value, once the user has confirmed with Touch ID.
+    /// Sending it on is separate.
+    func rotate(_ name: String, to value: String) throws {
+        try store.replaceValue(name, with: value, fileName: store.record(name)?.fileName)
+        revealed[name] = nil
+        // The new key's expiry isn't the old one's
+        store.setExpiry(name, nil)
+        log.log(.rotated, [name], detail: "New value")
+        leaks = leaks?.filter { $0.name != name || $0.place == .gitHistory }
+    }
+
+    // MARK: - The commit guard
+
+    func refreshGuard() {
+        let commitGuard = commitGuard
+        Task {
+            let status = await Task.detached { commitGuard.status() }.value
+            guardStatus = status
+            if status == .on { await Task.detached { commitGuard.refresh() }.value }
+        }
+    }
+
+    func setGuard(_ on: Bool) {
+        guardNote = nil
+        let commitGuard = commitGuard
+        Task {
+            let problem: String? = await Task.detached {
+                do {
+                    if on { try commitGuard.turnOn() } else { try commitGuard.turnOff() }
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+            guardNote = problem
+            guardStatus = await Task.detached { commitGuard.status() }.value
+        }
+    }
+
+    // MARK: - Leak check
+
+    /// From the last check, if there's been one since KeyBar opened
+    var leaks: [Leak]?
+    private(set) var leakProgress: String?
+    private(set) var isCheckingLeaks = false
+
+    var visibleLeaks: [Leak] {
+        (leaks ?? []).filter { !settings.ignoredLeaks.contains($0.id) }
+            .sorted { ($0.name, $0.place.rawValue, $0.path) < ($1.name, $1.place.rawValue, $1.path) }
+    }
+
+    func checkLeaks() async {
+        guard !isCheckingLeaks else { return }
+        isCheckingLeaks = true
+        leakProgress = "Starting"
+        defer {
+            isCheckingLeaks = false
+            leakProgress = nil
+        }
+        let watched = isDemo ? [] : Needles.all(in: store)
+        let scanner = LeakScanner(gitFolders: settings.scanFolders.map { URL(fileURLWithPath: $0) }, includeGit: settings.leakCheckGit)
+        let found = isDemo ? Demo.leaks() : await Task.detached {
+            scanner.scan(watched) { place in
+                Task { @MainActor [weak self] in self?.leakProgress = place }
+            }
+        }.value
+        leaks = found
+        settings.leakCheckedAt = Date()
+    }
+
+    /// Hides a leaked copy in its file. Returns what happened.
+    func hideLeak(_ leak: Leak) -> String {
+        guard let record = store.record(leak.name), let value = try? store.value(leak.name) else { return "KeyBar couldn't read \(leak.name)." }
+        do {
+            let count = try LeakScanner.hide(Needles.of(record, value: value), in: leak.path)
+            log.log(.hid, [leak.name], detail: "\(count) in \(BridgePolicy.tidy(leak.path))")
+            leaks?.removeAll { $0.id == leak.id }
+            return "Hid \(count) cop\(count == 1 ? "y" : "ies") in \(BridgePolicy.tidy(leak.path))."
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    func ignoreLeak(_ leak: Leak) {
+        settings.ignoredLeaks.append(leak.id)
+    }
+
     // MARK: - Keys Claude asks for
 
     /// A key Claude Code asked the user to add, while the Add window is up
@@ -412,6 +536,9 @@ final class AppState {
         selectedKey = nil
         log.clear()
         log.log(.deletedEverything, [])
+        // Hand git back its own hooks, and take KeyBar out of other AI apps
+        setGuard(false)
+        for app in AIApps.App.allCases where aiApps.status(app) == .connected { aiApps.disconnect(app) }
     }
 }
 
@@ -482,6 +609,20 @@ final class AppSettings {
     var shortcutTaken = false
 
     /// Unused keys the user chose to keep, so they're not offered again
+    /// Leak check: also read git history (slower)
+    var leakCheckGit: Bool = UserDefaults.standard.object(forKey: "leakCheckGit") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(leakCheckGit, forKey: "leakCheckGit") }
+    }
+
+    var leakCheckedAt: Date? = UserDefaults.standard.object(forKey: "leakCheckedAt") as? Date {
+        didSet { UserDefaults.standard.set(leakCheckedAt, forKey: "leakCheckedAt") }
+    }
+
+    /// Leaks the user said to leave alone (a throwaway test key, say)
+    var ignoredLeaks: [String] = UserDefaults.standard.stringArray(forKey: "ignoredLeaks") ?? [] {
+        didSet { UserDefaults.standard.set(ignoredLeaks, forKey: "ignoredLeaks") }
+    }
+
     var keptUnused: [String] = UserDefaults.standard.stringArray(forKey: "keptUnused") ?? [] {
         didSet { UserDefaults.standard.set(keptUnused, forKey: "keptUnused") }
     }

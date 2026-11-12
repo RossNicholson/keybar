@@ -5,6 +5,8 @@ struct ClaudeCodeView: View {
     @Environment(AppState.self) private var state
     @State private var showingManual = false
     @State private var copiedCommand = false
+    @State private var showingSetup: AIApps.App?
+    @State private var copiedSetup: AIApps.App?
 
     var body: some View {
         @Bindable var settings = state.settings
@@ -44,6 +46,14 @@ struct ClaudeCodeView: View {
                 }
             })
 
+            SectionLabel(text: "Other AI apps")
+            Text("The same tools, in the other AI apps you use. Each one's other settings are left as they are.")
+                .font(.mono(10))
+                .foregroundStyle(AppColors.secondaryText)
+            VStack(spacing: 8) {
+                ForEach(state.aiApps.ordered) { app in aiAppRow(app) }
+            }
+
             SectionLabel(text: "How it works")
             VStack(alignment: .leading, spacing: 10) {
                 step(1, "Claude asks KeyBar which keys there are. It gets names like CLOUDFLARE_API_TOKEN, never values.")
@@ -68,7 +78,66 @@ struct ClaudeCodeView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .pastelCard(AppColors.lilac, radius: Radius.window)
         }
-        .onAppear { claude.refresh() }
+        .onAppear {
+            claude.refresh()
+            state.aiApps.refresh()
+        }
+    }
+
+    // MARK: - Other AI apps
+
+    private func aiAppRow(_ app: AIApps.App) -> some View {
+        let apps = state.aiApps
+        let status = apps.status(app)
+        let installed = apps.isInstalled(app)
+        let detail: String = {
+            switch status {
+            case .connected: return "Connected · \(BridgePolicy.tidy(apps.url(app).path))"
+            case .elsewhere(let path): return "Set up for another copy of KeyBar (\(BridgePolicy.tidy(path)))"
+            case .disconnected: return installed ? "Not connected" : "Not found on this Mac"
+            }
+        }()
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                SymbolTile(symbol: status == .connected ? "checkmark" : "app.connected.to.app.below.fill",
+                           fill: status == .connected ? AppColors.mint : (installed ? AppColors.periwinkle : AppColors.ground), size: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(app.title)
+                        .font(.mono(11.5, weight: .semibold))
+                        .foregroundStyle(AppColors.text)
+                    Text(detail)
+                        .font(.mono(9.5))
+                        .foregroundStyle(AppColors.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                if !app.isManual {
+                    switch status {
+                    case .connected: GhostButton(title: "Disconnect") { apps.disconnect(app) }
+                    case .elsewhere: GhostButton(title: "Reconnect", symbol: "arrow.triangle.2.circlepath") { apps.connect(app) }
+                    case .disconnected: GhostButton(title: "Connect", symbol: "link") { apps.connect(app) }
+                    }
+                }
+                GhostButton(title: showingSetup == app ? "Hide" : "Setup", symbol: "curlybraces") {
+                    withAnimation { showingSetup = showingSetup == app ? nil : app }
+                }
+            }
+            if let error = apps.errors[app] { SettingNote(error) }
+            if let note = apps.connectedNote[app], status == .connected { SettingNote(note, isError: false) }
+            if showingSetup == app {
+                Text(app.isManual ? "Add this to \(BridgePolicy.tidy(apps.url(app).path)):" : "Or add this to \(BridgePolicy.tidy(apps.url(app).path)) yourself:")
+                    .font(.mono(9.5))
+                    .foregroundStyle(AppColors.secondaryText)
+                code(apps.snippet(app))
+                GhostButton(title: copiedSetup == app ? "Copied" : "Copy", symbol: copiedSetup == app ? "checkmark" : "doc.on.doc") {
+                    Clipboard.copyText(apps.snippet(app))
+                    copiedSetup = app
+                }
+            }
+        }
+        .padding(12)
+        .card(radius: Radius.row)
     }
 
     // MARK: - Status

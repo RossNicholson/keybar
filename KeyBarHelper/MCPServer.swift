@@ -29,7 +29,11 @@ final class MCPServer: @unchecked Sendable {
     list_secrets) is set as the path to a private copy of it, for tools that want a key file. If a key you need \
     isn't stored, call request_secret: KeyBar asks the user to add it, and you never see it. To put a key into a \
     GitHub repo's Actions secrets or a Cloudflare Worker's or Pages project's secrets, call send_secret rather \
-    than piping it into gh or wrangler yourself.
+    than piping it into gh or wrangler yourself. A key marked "through KeyBar's proxy" is set to a placeholder: \
+    SDKs read the base URL variable named there (e.g. ANTHROPIC_BASE_URL) and work as normal; for curl, call \
+    "$ANTHROPIC_BASE_URL/v1/messages" instead of the service's own address. A project's .keybar file lists the \
+    keys it uses; others are hidden there. If a commit is stopped by KeyBar's commit guard, a stored key's value \
+    is in the changes: replace it with a reference to the environment variable, never commit it.
     """
 
     func run() {
@@ -66,7 +70,7 @@ final class MCPServer: @unchecked Sendable {
         case "initialize":
             let requested = params["protocolVersion"] as? String
             if let name = (params["clientInfo"] as? [String: Any])?["name"] as? String, !name.isEmpty {
-                let label = name.lowercased().contains("claude") ? "Claude Code" : String(name.prefix(40))
+                let label = Bridge.label(forClient: name)
                 lock.withLock { client = label }
             }
             reply(id, [
@@ -249,11 +253,15 @@ final class MCPServer: @unchecked Sendable {
             if let note = secret.note, !note.isEmpty { line += " (\(note))" }
             if secret.restricted { line += secret.availableHere ? " (limited to some projects, including this one)" : " (not available in this folder)" }
             if let fileName = secret.fileName { line += " (file \(fileName): $\(secret.name) is its path)" }
+            if let variable = secret.proxyVariable {
+                line += " (through KeyBar's proxy: $\(secret.name) is a placeholder; call $\(variable) instead of the service's address)"
+            }
             if let expires = secret.expiresAt {
                 line += expires < Date() ? " (EXPIRED \(Self.day(expires)), may not work)" : " (expires \(Self.day(expires)))"
             }
             lines.append(line)
         }
+        if let message = reply.message { lines.append("\n" + message) }
         return toolText(lines.joined(separator: "\n"))
     }
 
@@ -351,12 +359,13 @@ final class MCPServer: @unchecked Sendable {
 
         let handle = CommandRunner.Handle()
         lock.withLock { running[requestID] = handle }
-        let result = CommandRunner.run(command, in: cwd, extraEnvironment: keyFiles.environment(values),
+        let environment = keyFiles.environment(values).merging(Bridge.proxyEnvironment(reply.environment)) { key, _ in key }
+        let result = CommandRunner.run(command, in: cwd, extraEnvironment: environment,
                                        timeout: timeout, handle: handle)
         lock.withLock { running[requestID] = nil }
         keyFiles.remove()
         let redactor = Redactor(secrets: values.flatMap { name, value in
-            fileNames[name] == nil ? [value] : KeyFiles.secretParts(of: value) })
+            value == Bridge.proxyPlaceholder ? [] : fileNames[name] == nil ? [value] : KeyFiles.secretParts(of: value) })
         let stdout = redactor.redact(result.stdout)
         let stderr = redactor.redact(result.stderr)
         let redactions = stdout.count + stderr.count

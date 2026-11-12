@@ -54,6 +54,11 @@ final class ScreenshotTests: XCTestCase {
                                  to: out.appendingPathComponent("window-\(section.rawValue)\(dark ? "-dark" : "").png"))
             }
         }
+        // The whole Claude Code screen, other AI apps and all
+        let tall = Demo.state()
+        tall.section = .claudeCode
+        try Snapshot.png(ContentView().environment(tall), size: NSSize(width: 980, height: 1900),
+                         to: out.appendingPathComponent("window-claudeCode-full.png"))
         let state = Demo.state()
         let record = state.store.record("STRIPE_SECRET_KEY")!
         try Snapshot.panel(to: out.appendingPathComponent("window-edit.png")) {
@@ -67,6 +72,15 @@ final class ScreenshotTests: XCTestCase {
         }
         try Snapshot.panel(to: out.appendingPathComponent("window-edit-file.png")) {
             KeyEditor(record: state.store.record("GOOGLE_SERVICE_ACCOUNT")!) {}.environment(state)
+        }
+        try Snapshot.panel(to: out.appendingPathComponent("window-rotate.png")) {
+            RotateKeyView(name: "GITHUB_TOKEN") {}.environment(state)
+        }
+        try Snapshot.panel(to: out.appendingPathComponent("window-edit-anthropic.png")) {
+            KeyEditor(record: state.store.record("ANTHROPIC_API_KEY")!) {}.environment(state)
+        }
+        try Snapshot.panel(to: out.appendingPathComponent("window-project-keys.png")) {
+            ProjectKeysEditor(folder: "\(NSHomeDirectory())/Dev/website") {}.environment(state)
         }
         try Snapshot.panel(to: out.appendingPathComponent("window-send.png")) {
             SendKeyView(name: "GITHUB_TOKEN") {}.environment(state)

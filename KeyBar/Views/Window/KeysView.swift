@@ -234,6 +234,9 @@ struct KeyEditor: View {
     @State private var sending = false
     /// Sends again, by destination ID: what happened
     @State private var resent: [String: String] = [:]
+    @State private var approval: ApprovalChoice = .settings
+    @State private var proxied = false
+    @State private var rotating = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -295,9 +298,38 @@ struct KeyEditor: View {
                 GhostButton(title: "Limit to a folder…", symbol: "folder.badge.plus") { chooseFolder() }
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                FieldLabel(text: "Touch ID", detail: "before a command uses it")
+                PillPicker(selection: $approval, options: ApprovalChoice.allCases, track: AppColors.surface) { $0.title }
+                if approval == .never {
+                    Text("Claude and other apps can use it without asking you. Only for keys that don't matter if they leak.")
+                        .font(.mono(9.5))
+                        .foregroundStyle(AppColors.secondaryText)
+                }
+            }
+            if KeyProxy.route(for: record) != nil {
+                Toggle(isOn: $proxied) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Through KeyBar's proxy")
+                            .font(.mono(11, weight: .semibold))
+                            .foregroundStyle(AppColors.text)
+                        Text("Commands get a placeholder and $\(KeyProxy.route(for: record)?.variable ?? ""); KeyBar adds the key to their requests, so they never have it. See Dev tools.")
+                            .font(.mono(9.5))
+                            .foregroundStyle(AppColors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .tint(AppColors.toggle)
+            }
+
             sentTo
 
             HStack(spacing: 8) {
+                GhostButton(title: "Rotate…", symbol: "arrow.triangle.2.circlepath") { rotating = true }
+                    .fixedSize()
+                    .help("Swap in a new key and send it everywhere this one went")
                 GhostButton(title: "Send to GitHub or Cloudflare…", symbol: "paperplane") { sending = true }
                     .fixedSize()
                 if KeyTester.canTest(record) {
@@ -362,6 +394,8 @@ struct KeyEditor: View {
             group = record.group ?? ""
             note = record.note ?? ""
             folders = record.projectFolders
+            approval = ApprovalChoice(record.approval)
+            proxied = record.proxied == true
             if let date = record.expiresAt {
                 expires = true
                 expiresAt = date
@@ -369,6 +403,10 @@ struct KeyEditor: View {
         }
         .sheet(isPresented: $sending) {
             SendKeyView(name: record.name) { sending = false }
+                .environment(state)
+        }
+        .sheet(isPresented: $rotating) {
+            RotateKeyView(name: record.name) { rotating = false }
                 .environment(state)
         }
     }
@@ -478,6 +516,8 @@ struct KeyEditor: View {
                 try state.replaceValue(current, with: newValue.trimmingCharacters(in: .whitespacesAndNewlines))
             }
             state.setExpiry(current, expires ? expiresAt : nil)
+            state.setApproval(current, approval.value)
+            state.setProxied(current, proxied)
             if var updated = state.store.record(current) {
                 let changed = updated.group != group.nonEmpty || updated.note != note.nonEmpty || updated.projectFolders != folders
                 updated.group = group
@@ -489,6 +529,35 @@ struct KeyEditor: View {
             done()
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+/// A key's Touch ID rule, as a picker shows it
+enum ApprovalChoice: CaseIterable, Hashable {
+    case settings, everyTime, never
+
+    init(_ approval: KeyApproval?) {
+        switch approval {
+        case .everyTime: self = .everyTime
+        case .never: self = .never
+        case nil: self = .settings
+        }
+    }
+
+    var value: KeyApproval? {
+        switch self {
+        case .settings: return nil
+        case .everyTime: return .everyTime
+        case .never: return .never
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .settings: return "As in Settings"
+        case .everyTime: return "Every time"
+        case .never: return "Don't ask"
         }
     }
 }
@@ -576,17 +645,28 @@ struct ImportView: View {
 /// Keys that need looking at: expiring soon, or unused for months
 private struct AttentionCards: View {
     @Environment(AppState.self) private var state
+    @State private var rotating: String?
 
     var body: some View {
+        VStack(spacing: 14) { banners }
+            .sheet(item: Binding(get: { rotating.map(RotateTarget.init) }, set: { rotating = $0?.name })) { target in
+                RotateKeyView(name: target.name) { rotating = nil }
+                    .environment(state)
+            }
+    }
+
+    @ViewBuilder private var banners: some View {
         let expiring = state.store.active.filter(\.expiresSoon)
         let unused = KeyHealth.unused(state.store.active).filter { !state.settings.keptUnused.contains($0.name) }
         if !expiring.isEmpty {
             AttentionBanner(symbol: "calendar.badge.exclamationmark",
                             title: expiring.count == 1 ? "A key expires soon" : "\(expiring.count) keys expire soon",
                             message: expiring.map { "\($0.name): \(KeyHealth.expiryText($0)?.lowercased() ?? "")" }.joined(separator: " · ")
-                                + ". Make a new one, paste it in with Edit, then Send again wherever it went.",
+                                + ". Rotate swaps in a new one and sends it wherever the old one went.",
                             fill: AppColors.coral) {
-                EmptyView()
+                if expiring.count == 1 {
+                    PillButton(title: "Rotate", symbol: "arrow.triangle.2.circlepath") { rotating = expiring[0].name }
+                }
             }
         }
         if !unused.isEmpty {

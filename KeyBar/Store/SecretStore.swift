@@ -25,8 +25,14 @@ struct SecretRecord: Codable, Identifiable, Hashable, Sendable {
     /// Where it's been sent (GitHub Actions secrets, Cloudflare), so a new
     /// value can be sent to the same places
     var destinations: [Destination]?
+    /// When to ask with Touch ID before a command uses it; nil follows Settings
+    var approval: KeyApproval?
+    /// Commands get a placeholder and a local address instead of the key, and
+    /// KeyBar adds the key to their requests to the service (see KeyProxy)
+    var proxied: Bool?
 
     var id: String { name }
+    var usesProxy: Bool { proxied == true && KeyProxy.route(for: self) != nil }
     var isFile: Bool { fileName != nil }
     var sentTo: [Destination] { destinations ?? [] }
 
@@ -56,6 +62,14 @@ struct SecretRecord: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// A key's own rule for asking with Touch ID before a command uses it
+enum KeyApproval: String, Codable, Sendable, CaseIterable {
+    /// Every use, whatever Settings says: for the keys that matter most
+    case everyTime
+    /// Never: for a throwaway test key. `keybar run` still asks.
+    case never
+}
+
 /// The details that travel with a synced key, in its Keychain item: when
 /// it was last used stays on each Mac
 struct SyncedDetails: Codable, Equatable {
@@ -69,6 +83,8 @@ struct SyncedDetails: Codable, Equatable {
     var fileName: String?
     var expiresAt: Date?
     var destinations: [Destination]?
+    var approval: KeyApproval?
+    var proxied: Bool?
 
     init(_ record: SecretRecord) {
         group = record.group
@@ -81,6 +97,8 @@ struct SyncedDetails: Codable, Equatable {
         fileName = record.fileName
         expiresAt = record.expiresAt
         destinations = record.destinations
+        approval = record.approval
+        proxied = record.proxied
     }
 
     func apply(to record: inout SecretRecord) {
@@ -94,6 +112,8 @@ struct SyncedDetails: Codable, Equatable {
         record.fileName = fileName
         record.expiresAt = expiresAt
         record.destinations = destinations
+        record.approval = approval
+        record.proxied = proxied
     }
 
     var encoded: Data? {
@@ -160,6 +180,11 @@ final class SecretStore {
     func value(_ name: String) throws -> String {
         guard let value = try vault.read(name) else { throw StoreError.missing(name) }
         return value
+    }
+
+    /// A value read without a Keychain dialog, or nil if macOS would ask
+    func quietValue(_ name: String) -> String? {
+        try? vault.read(name, interactive: false)
     }
 
     /// Every value, for checking a command doesn't contain one. Never shows

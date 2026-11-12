@@ -60,9 +60,32 @@ enum Demo {
         ])
         let claude = ClaudeConnector(home: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("keybar-demo-home"),
                                      helperPath: "/Applications/KeyBar.app/Contents/Helpers/keybar")
-        let state = AppState(store: store, log: log, claude: claude)
+        if var record = store.record("ANTHROPIC_API_KEY") {
+            record.proxied = true
+            store.update(record)
+        }
+        if var record = store.record("STRIPE_SECRET_KEY") {
+            record.approval = .everyTime
+            store.update(record)
+        }
+        let demoHome = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("keybar-demo-home")
+        let aiApps = AIApps(home: demoHome, helperPath: "/Applications/KeyBar.app/Contents/Helpers/keybar")
+        let state = AppState(store: store, log: log, claude: claude, aiApps: aiApps)
+        state.leaks = leaks()
         state.isDemo = true
         return state
+    }
+
+    /// What the leak check might find, for screenshots
+    static func leaks() -> [Leak] {
+        let home = NSHomeDirectory()
+        return [
+            Leak(name: "OPENAI_API_KEY", place: .claudeCode,
+                 path: "\(home)/.claude/projects/-Users-you-Dev-blog/3f2a9c1e-5b7d-4e8a-9c0f-1d2e3f4a5b6c.jsonl", count: 2),
+            Leak(name: "OPENAI_API_KEY", place: .shellHistory, path: "\(home)/.zsh_history", count: 1),
+            Leak(name: "STRIPE_SECRET_KEY", place: .gitHistory, path: "\(home)/Dev/shop",
+                 detail: "commit 8c41d2e 2026-03-14 · src/config.js", count: 1),
+        ]
     }
 
     nonisolated static let demoServiceAccount = """

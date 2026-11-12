@@ -108,6 +108,9 @@ struct ActivityRow: View {
         case .sent: return "paperplane.fill"
         case .requested: return "questionmark.bubble.fill"
         case .tested: return "checkmark.seal.fill"
+        case .stopped: return "hand.raised.fill"
+        case .rotated: return "arrow.triangle.2.circlepath"
+        case .hid: return "eye.slash.fill"
         }
     }
 

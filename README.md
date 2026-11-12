@@ -72,7 +72,34 @@ claude mcp add --scope user keybar -- /Applications/KeyBar.app/Contents/Helpers/
 | `request_secret` | Asks you for a key KeyBar doesn't have. KeyBar opens *Add key* with the name filled in and Claude's reason (what it's for, where to make one) above it. You paste the key; Claude only hears that it's stored. |
 | `send_secret` | Sends a stored key to a GitHub repo's Actions secrets, or a Cloudflare Worker or Pages project, so a deploy can use it. Always asks with Touch ID, whatever *Ask before Claude uses a key* is set to. |
 
-Other MCP clients can use the same server; the activity log shows them by name.
+### Other AI apps
+
+The same screen connects **Claude Desktop, Cursor, Windsurf, VS Code (Copilot agent mode), Codex CLI and Gemini CLI**: **Connect** adds KeyBar's server to that app's own MCP settings file and keeps everything else in it. A settings file with comments (which isn't plain JSON) is left alone, and **Setup** shows the lines to add by hand. Zed is always set up by hand. The activity log names the app that used each key.
+
+| App | Settings file |
+|---|---|
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Cursor | `~/.cursor/mcp.json` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| VS Code | `~/Library/Application Support/Code/User/mcp.json` |
+| Codex CLI | `~/.codex/config.toml` (a block between `# KeyBar:start` and `# KeyBar:end`) |
+| Gemini CLI | `~/.gemini/settings.json` |
+| Zed | `~/.config/zed/settings.json` (by hand) |
+
+## Project key lists: `.keybar`
+
+Put a `.keybar` file in a project's folder listing the keys it uses, one name per line (**Dev tools → Make one…** writes it for you). Inside that folder, and the folders under it:
+
+- Claude's `list_secrets` only shows those keys, and `run_with_secrets` refuses any other.
+- `keybar run -- COMMAND` sets them, with no `--key` flags or `.env` needed.
+
+```
+# The keys this project uses
+CLOUDFLARE_API_TOKEN
+CLOUDFLARE_ACCOUNT_ID
+```
+
+It holds names only, never values, so it's safe to commit. KeyBar looks for the nearest `.keybar` going up from the folder, stopping at your home folder.
 
 ## Find keys on this Mac
 
@@ -98,6 +125,34 @@ keybar run --env-file .env.production -- npm start
 
 KeyBar asks with Touch ID first and shows the command. One yes covers that exact command in that folder for 15 minutes; `keybar run` always asks, whatever Settings says about Claude, because its output isn't redacted. Other lines in the `.env` are set too, unless they're set already, the way dotenv does it, so tools that read `.env` themselves (Next.js, Vite, dotenv) keep working: the real values are already in the environment. Folder limits apply, and inside Claude Code `keybar run` refuses and points Claude to `run_with_secrets`.
 
+## The AI proxy: keys commands never have
+
+For **Anthropic, OpenAI and Groq API keys**. Edit a key and turn on **Through KeyBar's proxy**. From then on, a command given that key gets the placeholder `keybar-proxy` instead of the value, plus a local address in `ANTHROPIC_BASE_URL` (or `OPENAI_BASE_URL`, `GROQ_BASE_URL`). The official SDKs and most tools read those, so they send their requests to KeyBar, which swaps in the real key and passes the request on to the service over HTTPS. Streaming replies come straight back.
+
+The command never has the key, so nothing it prints, logs or sends anywhere can contain it. Each address is a one-off: it only works while that command runs, and only on `127.0.0.1`. The activity log counts the requests that went through. A command that calls the service's own address directly (`curl https://api.anthropic.com/…`) only has the placeholder and fails, which is why it's off until you turn it on.
+
+## Leak check
+
+**Leak check** looks for the exact values of your stored keys where they've been copied:
+
+- Claude Code's transcripts, prompt history and settings (`~/.claude`, `~/.claude.json`)
+- Codex, Gemini CLI, Cursor, Windsurf and Claude Desktop's chats and settings
+- zsh, bash and fish history, and Python, Node and database console history
+- With **Include git history** on, every commit in the repositories under your *Find keys* folders
+
+Each find shows the file (or the commit and file), how many copies, and **Show** in Finder. **Hide** replaces the copies in that file with `[REDACTED]`; a key in git history can't be hidden. Either way the safe fix is a new key, so each leaked key has **Rotate**. Account IDs, publishable keys and other identifiers aren't secret and are skipped, and so are values under 12 characters. It all runs on your Mac.
+
+## Commit guard
+
+**Dev tools → Stop commits that contain a key** checks every commit in every repo on this Mac, whoever makes it, you or Claude. Before the commit, `keybar guard` reads the staged changes and asks KeyBar whether any added line holds a stored key's value; KeyBar answers with key names only, so the hook never sees a value. A commit with a key is stopped and the file named:
+
+```
+KeyBar stopped this commit: it contains the value of a stored key.
+  src/config.js: STRIPE_SECRET_KEY
+```
+
+It works by pointing git's global `core.hooksPath` at `~/.keybar/hooks`. Each hook there runs the repo's own hook (`.git/hooks/…`) as well, so nothing you had stops working. If you already use a global hooks folder, KeyBar leaves it alone and gives you the line to add to your own `pre-commit`. A repo with its own `core.hooksPath` (Husky, say) isn't checked. Skip it once with `git commit --no-verify`. If KeyBar isn't running, commits go ahead with a warning.
+
 ## Send keys to GitHub and Cloudflare
 
 Open a key, click **Send to GitHub or Cloudflare…** and tick the repos (or type a Worker or Pages project). After one Touch ID, KeyBar runs `gh secret set` or `wrangler secret put` with the value on the tool's standard input, so it's never on screen or in the process list. KeyBar remembers where each key went: after you paste in a new value, **Send again** puts it everywhere it was.
@@ -111,6 +166,10 @@ Some keys are files: a Google service account's `.json`, Apple's `AuthKey_….p8
 ```bash
 GOOGLE_APPLICATION_CREDENTIALS="$GSC_KEY" python report.py
 ```
+
+## Rotate a key
+
+Open a key and click **Rotate…** (it's also on leak check finds and expiry warnings). It walks you through it: open the service's keys page, paste the new key and **Test** it, then **Save**. After one Touch ID, KeyBar stores the new value and sends it everywhere the old one went (GitHub repos, Workers, Pages). It won't save a value that's the same as the old one. Then it reminds you to revoke the old key on the service's site, so a leaked copy stops working.
 
 ## Expiry, testing and tidying
 
@@ -144,6 +203,7 @@ Sync needs KeyBar's provisioning profile, which only the builds from Homebrew an
 - **Folder limits.** Lock a key to the project folders that need it; a command run anywhere else is refused.
 - **Refuses pasted keys.** A command with a key's actual value written into it is refused, so values don't end up in Claude's transcript.
 - **Touch ID for Claude, too.** Before Claude Code uses a key, KeyBar asks with Touch ID and shows the command it wants to run. By default one yes covers the same keys from the same project for 15 minutes; choose every time, an hour or never in Settings.
+- **Touch ID rules per key.** Edit a key to set *Every time* for the ones that matter most (a live Stripe key, say), or *Don't ask* for harmless ones, whatever Settings says. `keybar run` always asks.
 - **Knows 468 services.** CLOUDFLARE_API_TOKEN is recognised as Cloudflare's API token, STRIPE_PUBLISHABLE_KEY as Stripe's publishable key. The list is built in, so recognising one never touches the network.
 - **Recognises pasted keys.** Paste `sk-ant-…`, `ghp_…`, `sk_live_…` and dozens more and the name is filled in for you. Paste a whole `NAME=value` line and both fields fill.
 - **Imports .env files.** Pick which lines to bring in, then delete the file. Or let [Find keys](#find-keys-on-this-mac) find them all.
@@ -172,7 +232,7 @@ Sync needs KeyBar's provisioning profile, which only the builds from Homebrew an
 
 ## Privacy
 
-KeyBar makes no network requests of its own except checking for updates (Homebrew's index, or GitHub's latest release for a DMG install), and two you start yourself: **Test** sends the key to its own service only, and **Send** runs `gh` or `wrangler`, which talk to GitHub or Cloudflare. No analytics, no crash reporter, no account. Service recognition is built in. With sync on, macOS's iCloud Keychain carries the keys between your Macs; KeyBar never sees that traffic.
+KeyBar makes no network requests of its own except checking for updates (Homebrew's index, or GitHub's latest release for a DMG install), and two you start yourself: **Test** sends the key to its own service only, and **Send** runs `gh` or `wrangler`, which talk to GitHub or Cloudflare. The AI proxy only passes on requests your commands make, to the service the key belongs to. Leak check and the commit guard run entirely on your Mac. No analytics, no crash reporter, no account. Service recognition is built in. With sync on, macOS's iCloud Keychain carries the keys between your Macs; KeyBar never sees that traffic.
 
 Local files, all readable only by you:
 
@@ -185,10 +245,12 @@ Local files, all readable only by you:
 | The socket the helper uses | `~/.keybar/keybar.sock` |
 | File keys while a command runs | A private folder in your temporary folder, deleted when it ends |
 | Claude Code connection | `~/.claude.json` and, if you choose, a marked note in `~/.claude/CLAUDE.md` |
+| Other AI apps' connections | Each app's own MCP settings file (see [Other AI apps](#other-ai-apps)) |
+| Commit guard hooks | `~/.keybar/hooks`, and git's global `core.hooksPath` |
 
 ## Uninstalling
 
-In KeyBar, **Settings → Delete everything** removes every key from the Keychain and disconnects Claude Code. Then `brew uninstall --zap --cask keybar` removes the app and `~/.keybar`.
+In KeyBar, **Settings → Delete everything** removes every key from the Keychain, disconnects Claude Code and the other AI apps, and turns off the commit guard (giving git back its own hooks). Then `brew uninstall --zap --cask keybar` removes the app and `~/.keybar`. If you remove the app without turning the commit guard off first, run `git config --global --unset core.hooksPath` so repos' own hooks run again.
 
 ## Build from source
 

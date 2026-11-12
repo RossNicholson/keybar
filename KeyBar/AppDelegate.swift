@@ -49,6 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             quickCopy?.toggle()
         }
         updateHotKey()
+        // Rewrites the commit guard's hooks if KeyBar has moved
+        state.refreshGuard()
         UNUserNotificationCenter.current().delegate = self
         // Demo keys answer the helper too, so the whole flow can be tried
         // without real keys
@@ -132,7 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func startBridge() {
-        let policy = BridgePolicy(store: state.store, log: state.log, settings: state.settings)
+        let policy = BridgePolicy(store: state.store, log: state.log, settings: state.settings, proxy: state.proxy)
         self.policy = policy
         let prompting = PromptGate()
         let state = self.state!

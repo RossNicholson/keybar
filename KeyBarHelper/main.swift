@@ -13,6 +13,8 @@ case "mcp":
     MCPServer(version: version).run()
 case "run":
     TerminalRun.main(Array(CommandLine.arguments.dropFirst(2)))
+case "guard":
+    CommitGuardCheck.main()
 case "--version", "version":
     print("keybar \(version)")
 default:
@@ -22,6 +24,7 @@ default:
     Usage:
       keybar run -- COMMAND  Run a command with keys from KeyBar (keybar run --help)
       keybar mcp             Run the MCP server (Claude Code starts this for you)
+      keybar guard           Stop a commit that has a stored key in it (git runs this)
       keybar --version       Print the version
 
     Connect it from KeyBar → Claude Code, or by hand:

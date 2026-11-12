@@ -15,6 +15,8 @@ struct RunPlan: Equatable, Sendable {
     var plain: [String: String] = [:]
     /// The env files read, for messages
     var envFiles: [String] = []
+    /// The project's .keybar file, if it has one: its keys are set too
+    var projectFile: String?
     var command: [String] = []
 
     /// The stored keys to ask KeyBar for
@@ -41,8 +43,8 @@ struct RunPlan: Equatable, Sendable {
             case .unknownOption(let option): return "keybar run has no option \(option)."
             case .unreadable(let path): return "Couldn't read \(path)."
             case .nothingToSet:
-                return "No keys to set. Name some with --key NAME, or put NAME=keybar:STORED_NAME lines in .env "
-                    + "(KeyBar's Find keys can write them for you)."
+                return "No keys to set. Name some with --key NAME, list them in a .keybar file, or put "
+                    + "NAME=keybar:STORED_NAME lines in .env (KeyBar's Find keys can write them for you)."
             }
         }
     }
@@ -115,6 +117,11 @@ struct RunPlan: Equatable, Sendable {
                     plan.plain[entry.name] = entry.value
                 }
             }
+        }
+        // The keys the project's .keybar lists, as themselves
+        if let project = ProjectKeys.find(from: folder, read: read) {
+            plan.projectFile = project.path
+            for name in project.names where plan.keys[name] == nil { plan.keys[name] = name }
         }
         // A variable set from a key isn't also set from a plain line
         for variable in plan.keys.keys { plan.plain[variable] = nil }

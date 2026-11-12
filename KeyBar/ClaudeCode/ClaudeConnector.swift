@@ -109,7 +109,7 @@ final class ClaudeConnector {
 
     /// Writes `data` over the file at `url`, following a symlink to the real
     /// file and keeping its permissions (new files are private)
-    static func replaceFile(_ url: URL, with data: Data) throws {
+    nonisolated static func replaceFile(_ url: URL, with data: Data) throws {
         let fm = FileManager.default
         let target = url.resolvingSymlinksInPath()
         let permissions = (try? fm.attributesOfItem(atPath: target.path))?[.posixPermissions] as? NSNumber

@@ -25,6 +25,32 @@ enum Bridge {
     /// How long the user has to add a key Claude asked for
     static let requestTimeout: TimeInterval = 300
 
+    /// What to call the app that started us, from the name it gives
+    static func label(forClient name: String) -> String {
+        let lower = name.lowercased()
+        let known: [(String, String)] = [
+            ("claude-code", "Claude Code"), ("claude code", "Claude Code"), ("claude-ai", "Claude Desktop"),
+            ("claude desktop", "Claude Desktop"), ("cursor", "Cursor"), ("windsurf", "Windsurf"), ("codex", "Codex"),
+            ("gemini", "Gemini CLI"), ("visual studio code", "VS Code"), ("vscode", "VS Code"), ("zed", "Zed"),
+        ]
+        if let match = known.first(where: { lower.contains($0.0) }) { return match.1 }
+        // KeyBar's own Connect test, and older Claude Code versions
+        if lower.contains("claude") { return "Claude Code" }
+        return String(name.prefix(40))
+    }
+
+    /// The only extra variables a `resolve` reply may set
+    static let proxyVariables: Set<String> = ["ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GROQ_BASE_URL"]
+    /// What a proxied key's variable is set to instead of the key
+    static let proxyPlaceholder = "keybar-proxy"
+
+    /// Keeps only proxy variables that point at KeyBar on this Mac
+    static func proxyEnvironment(_ environment: [String: String]?) -> [String: String] {
+        (environment ?? [:]).filter { name, value in
+            proxyVariables.contains(name) && value.hasPrefix("http://127.0.0.1:") && !value.contains(where: \.isNewline)
+        }
+    }
+
     /// How long the app leaves a Touch ID prompt up, and how long the helper
     /// waits for a reply when there might be one (a little longer)
     static let approvalTimeout: TimeInterval = 170
@@ -44,6 +70,9 @@ struct BridgeRequest: Codable, Sendable {
         case send
         /// Ask the user to add a key that isn't stored yet
         case request
+        /// Which stored keys are in some text (a commit's changes), by name:
+        /// never values either way
+        case check
     }
 
     var action: Action
@@ -64,6 +93,8 @@ struct BridgeRequest: Codable, Sendable {
     var destination: Destination? = nil
     /// For `request`: why it's wanted, shown to the user
     var reason: String? = nil
+    /// For `check`: file → the text to look in
+    var texts: [String: String]? = nil
 }
 
 /// A stored key as the helper sees it: everything but the value
@@ -80,6 +111,9 @@ struct SecretSummary: Codable, Sendable, Equatable {
     /// A key that's a whole file: commands get a path to it
     var fileName: String? = nil
     var expiresAt: Date? = nil
+    /// Used through KeyBar's proxy: commands get a placeholder, and this
+    /// variable (e.g. ANTHROPIC_BASE_URL) is the address to call instead
+    var proxyVariable: String? = nil
 }
 
 struct BridgeReply: Codable, Sendable {
@@ -92,6 +126,12 @@ struct BridgeReply: Codable, Sendable {
     var runID: String? = nil
     /// What happened, for `send` and `request`
     var message: String? = nil
+    /// For `resolve`: more variables to set, for keys used through KeyBar's
+    /// proxy (e.g. ANTHROPIC_BASE_URL). The helper only takes the names in
+    /// `Bridge.proxyVariables`, pointing at this Mac.
+    var environment: [String: String]? = nil
+    /// For `check`: file → the keys found in it
+    var found: [String: [String]]? = nil
 
     static func failure(_ message: String) -> BridgeReply { BridgeReply(ok: false, error: message) }
 }
