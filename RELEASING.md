@@ -39,10 +39,17 @@ ClawdBar, Mop Up and KeyBar:
 
 ## The first release
 1. Add the six secrets above to `RossNicholson/keybar` (the same values as the other apps).
-2. Copy `docs/keybar.rb` to `Casks/keybar.rb` in `RossNicholson/homebrew-tap` and push it. CI only
-   bumps an existing cask, so it has to be there before the first `make release`.
-3. `make release VERSION=1.0.0`.
-4. Add KeyBar to HouseStyle's "More apps by Ross" (`HouseMacApp`), tag it, and bump the apps.
+2. Merge the `add-keybar` branch of `RossNicholson/homebrew-tap` into main and push it. It adds
+   `Casks/keybar.rb` (from `docs/keybar.rb`) and the README row. CI only bumps an existing cask, so
+   it has to be there before the first `make release`.
+3. `make release VERSION=1.0.0`, and wait for CI to verify the published DMG.
+4. Remove the "not released yet" note from README.md's Install section.
+5. Merge the `keybar` branch of `RossNicholson/RossNicholsonWebsite` (the KeyBar page, home card,
+   privacy, terms, support, sitemap) and push it.
+6. Merge the `add-keybar` branch of `RossNicholson/brewdock` (KeyBar in Discover's "From the maker
+   of BrewDock") and ship it in the next BrewDock release.
+7. Add KeyBar to HouseStyle's "More apps by Ross" (`HouseMacApp`), tag it, and bump the apps.
+8. Connect Claude Code from the installed app and check a real `run_with_secrets`.
 
 ## What the release checks for KeyBar
 On top of notarization, `scripts/release.sh` refuses to ship unless the `keybar` helper in

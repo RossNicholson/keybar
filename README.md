@@ -37,6 +37,8 @@
 
 ## Install
 
+> **KeyBar 1.0.0 isn't released yet.** Until it is, the commands below won't find it. You can [build it from source](#build-from-source) in the meantime.
+
 ```bash
 brew tap RossNicholson/tap
 brew trust --cask rossnicholson/tap/keybar

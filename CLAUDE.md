@@ -66,14 +66,12 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
   ask for Touch ID like the real app; only tests skip it.
 - Still to check after the first release: Connect against Ross's real Claude Code from the installed
   app (it was only checked in a temp HOME, to keep build paths out of his config).
-- Release prep done 2026-11-12, waiting on Ross:
-  - Tap: local branch `add-keybar` in /Volumes/t7ssd/Dev/homebrew-tap (cask + README row), not pushed.
-    Merge and push it to main right before releasing (CI only bumps an existing cask).
-  - Website: local branch `keybar` in /Volumes/t7ssd/Dev/RossNicholsonWebsite (keybar.html, keybar.css,
-    images/keybar, home card, privacy, terms, support, sitemap). Merge to main after the release is out.
-  - BrewDock: local branch `add-keybar` in /Volumes/t7ssd/Dev/brewdock lists KeyBar in Discover's
-    "From the maker of BrewDock" (bundled KeyBarIcon). Merge, then ship it in the next BrewDock release.
-  - The repo has no CI secrets yet. Auto mode blocked disabling the workflow and a local notarised
-    build, so the release needs Ross: add the six secrets, then `make release VERSION=1.0.0`.
-  - After release: add KeyBar to HouseStyle "More apps", connect Ross's real Claude Code from the
-    installed app and check it.
+- Paused 2026-11-12 by Ross ("stop for now"). Release prep is done, waiting on Ross to add the six
+  CI secrets (or allow a local notarised release; auto mode blocked that and disabling the workflow).
+  Prepared branches, pushed to GitHub but not merged:
+  - homebrew-tap `add-keybar`: the cask + README row.
+  - RossNicholsonWebsite `keybar`: keybar.html/.css, images/keybar, home card, privacy, terms,
+    support, sitemap.
+  - brewdock `add-keybar`: KeyBar in Discover's featured list (bundled KeyBarIcon). Tests pass.
+  - README's Install section says 1.0.0 isn't out yet; remove that at release.
+  The order of steps is in RELEASING.md "The first release".
