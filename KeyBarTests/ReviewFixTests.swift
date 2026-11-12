@@ -144,7 +144,7 @@ final class ReviewFixTests: XCTestCase {
             return request
         }
         policy.approved(run(in: "/dev/ttys001"))
-        XCTAssertNil(policy.approvalPrompt(for: run(in: "/dev/ttys001")))
+        XCTAssertNotNil(policy.approvalPrompt(for: run(in: "/dev/ttys001")), "the same terminal is asked again too")
         XCTAssertNotNil(policy.approvalPrompt(for: run(in: "/dev/ttys009")), "another terminal is asked again")
         policy.approved(run(in: nil))
         XCTAssertNotNil(policy.approvalPrompt(for: run(in: nil)), "without a terminal it always asks")

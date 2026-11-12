@@ -38,7 +38,10 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
 - Don't connect Ross's real Claude Code from a dev build: it would register the build/dd path.
 
 ## Where we left off (2026-11-11)
-- **2026-11-12: fixes from a code review on main, waiting for Ross to release (next 1.4.x).** .env Import
+- **2026-11-12: `keybar run` asks for Touch ID every time** (Ross's call): no approval is ever reused, whatever
+  Settings or a key's own rule says. Closes the gap where a kept approval could be reused by something that
+  edited the command's script or got past the Claude Code check. On main, waiting for release as 1.4.6.
+- **2026-11-12: fixes from a code review, RELEASED in 1.4.5.** .env Import
   skips `keybar:` pointers (they overwrote real keys); moving keys to iCloud copies all first, deletes last
   (a failure moves nothing); a proxied key whose proxy can't be set up is refused, never handed over (the
   bridge checks `proxied`, not `usesProxy`); Touch ID prompt squeezes spaces, strips bidi/control

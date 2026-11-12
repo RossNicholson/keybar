@@ -287,9 +287,10 @@ final class TerminalPolicyTests: XCTestCase {
         XCTAssertEqual(policy.approvalPrompt(for: run("npm run dev")),
                        "give GITHUB_TOKEN to a command in /tmp (keybar run): npm run dev")
 
-        settings.approvalSeconds = 900
-        policy.approved(run("npm run dev"))
-        XCTAssertNil(policy.approvalPrompt(for: run("npm run dev")))
-        XCTAssertNotNil(policy.approvalPrompt(for: run("printenv")), "approving one command doesn't approve another")
+        for setting in AppSettings.approvalChoices {
+            settings.approvalSeconds = setting
+            policy.approved(run("npm run dev"))
+            XCTAssertNotNil(policy.approvalPrompt(for: run("npm run dev")), "keybar run asks every time, even right after a yes")
+        }
     }
 }

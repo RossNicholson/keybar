@@ -231,29 +231,23 @@ final class BridgePolicy {
             + " (\(tidy.count) characters)"
     }
 
-    /// How long one approval lasts. `keybar run` always asks (15 minutes at
-    /// most): its output isn't redacted, so "never" would let any program
-    /// running as you print every key with it.
+    /// How long one approval lasts. `keybar run` asks every time: its output
+    /// isn't redacted, and an approval kept for a while could be reused by
+    /// something that edits what the command runs (a package.json script, say)
+    /// or gets past the Claude Code check.
     /// A key set to ask every time always asks; if every key is set never to
     /// ask, it doesn't (except for `keybar run`)
     static func approvalSeconds(for request: BridgeRequest, setting: TimeInterval, keys: [KeyApproval] = []) -> TimeInterval {
-        var setting = setting
-        if keys.contains(.everyTime) {
-            setting = -1
-        } else if !keys.isEmpty && keys.count == (request.names ?? []).count && keys.allSatisfy({ $0 == .never }) {
-            setting = 0
-        }
-        guard request.client == Bridge.terminalClient else { return setting }
-        // Without its terminal an approval couldn't be kept to it: ask each time
-        if request.terminal == nil { return -1 }
-        guard setting == 0 else { return setting }
-        return 900
+        if request.client == Bridge.terminalClient { return -1 }
+        if keys.contains(.everyTime) { return -1 }
+        if !keys.isEmpty && keys.count == (request.names ?? []).count && keys.allSatisfy({ $0 == .never }) { return 0 }
+        return setting
     }
 
     /// One approval covers the same client using the same keys from the same
-    /// project, not every key for everyone. For `keybar run` it covers only
-    /// the same command in the same terminal: approving `npm run dev` doesn't
-    /// approve `printenv`, or `npm run dev` started from anywhere else.
+    /// project, not every key for everyone. (`keybar run` is never covered:
+    /// it asks every time. Its scope still names the command and terminal, so
+    /// nothing changes if that's ever relaxed.)
     static func approvalScope(_ request: BridgeRequest) -> String {
         var parts = [request.client, request.projectFolder ?? request.cwd, (request.names ?? []).sorted().joined(separator: ",")]
         if request.client == Bridge.terminalClient { parts += [request.command ?? "", request.terminal ?? ""] }

@@ -123,7 +123,7 @@ keybar run --key TOKEN=SHOP_API_TOKEN -- ./deploy.sh      # set a key under anot
 keybar run --env-file .env.production -- npm start
 ```
 
-KeyBar asks with Touch ID first and shows the command. One yes covers that exact command in that folder for 15 minutes; `keybar run` always asks, whatever Settings says about Claude, because its output isn't redacted. Other lines in the `.env` are set too, unless they're set already, the way dotenv does it, so tools that read `.env` themselves (Next.js, Vite, dotenv) keep working: the real values are already in the environment. Folder limits apply, and inside Claude Code `keybar run` refuses and points Claude to `run_with_secrets`.
+KeyBar asks with Touch ID first and shows the command. It asks every time you run it, whatever Settings says about Claude, because its output isn't redacted: a yes is never reused, so nothing can slip a different command in under an earlier approval. Other lines in the `.env` are set too, unless they're set already, the way dotenv does it, so tools that read `.env` themselves (Next.js, Vite, dotenv) keep working: the real values are already in the environment. Folder limits apply, and inside Claude Code `keybar run` refuses and points Claude to `run_with_secrets`.
 
 ## The AI proxy: keys commands never have
 
@@ -203,7 +203,7 @@ Sync needs KeyBar's provisioning profile, which only the builds from Homebrew an
 - **Folder limits.** Lock a key to the project folders that need it; a command run anywhere else is refused.
 - **Refuses pasted keys.** A command with a key's actual value written into it is refused, so values don't end up in Claude's transcript.
 - **Touch ID for Claude, too.** Before Claude Code uses a key, KeyBar asks with Touch ID and shows the command it wants to run. By default one yes covers the same keys from the same project for 15 minutes; choose every time, an hour or never in Settings.
-- **Touch ID rules per key.** Edit a key to set *Every time* for the ones that matter most (a live Stripe key, say), or *Don't ask* for harmless ones, whatever Settings says. `keybar run` always asks.
+- **Touch ID rules per key.** Edit a key to set *Every time* for the ones that matter most (a live Stripe key, say), or *Don't ask* for harmless ones, whatever Settings says. `keybar run` asks every time.
 - **Knows 468 services.** CLOUDFLARE_API_TOKEN is recognised as Cloudflare's API token, STRIPE_PUBLISHABLE_KEY as Stripe's publishable key. The list is built in, so recognising one never touches the network.
 - **Recognises pasted keys.** Paste `sk-ant-…`, `ghp_…`, `sk_live_…` and dozens more and the name is filled in for you. Paste a whole `NAME=value` line and both fields fill.
 - **Imports .env files.** Pick which lines to bring in, then delete the file. Or let [Find keys](#find-keys-on-this-mac) find them all.
