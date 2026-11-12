@@ -35,7 +35,7 @@ final class KeyProxy: @unchecked Sendable {
     /// services above (not OAuth tokens, which work differently)
     static func route(for record: SecretRecord) -> Route? {
         guard !record.isFile, record.name.hasSuffix("_KEY"), !record.name.contains("OAUTH"),
-              let service = record.service else { return nil }
+              let service = ServiceCatalog.destination(for: record.name, among: Set(routes.keys)) else { return nil }
         return routes[service.name]
     }
 
@@ -228,7 +228,10 @@ private final class ProxyConnection: NSObject, URLSessionDataDelegate, @unchecke
             if body.count > KeyProxy.maxBody { fail(413, "The request is too big for KeyBar's proxy."); return true }
             guard done else { return false }
         } else {
-            let length = Int(head.value("content-length") ?? "0") ?? 0
+            // Checked before use: a negative length would crash `prefix`
+            guard let length = Int(head.value("content-length") ?? "0"), length >= 0 else {
+                fail(400, "KeyBar couldn't read the request's length."); return true
+            }
             if length > KeyProxy.maxBody { fail(413, "The request is too big for KeyBar's proxy."); return true }
             guard buffer.count >= length else { return false }
             body = Data(buffer.prefix(length))
@@ -356,7 +359,9 @@ struct ChunkedDecoder: Sendable {
             }
             guard let line = buffer.range(of: Data("\r\n".utf8)) else { return false }
             let text = String(decoding: buffer[..<line.lowerBound], as: UTF8.self)
-            guard let size = Int(text.split(separator: ";").first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? "", radix: 16) else {
+            // A negative or huge size would crash `prefix` or overflow
+            guard let size = Int(text.split(separator: ";").first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? "", radix: 16),
+                  size >= 0, size <= KeyProxy.maxBody else {
                 failed = true
                 return true
             }

@@ -454,6 +454,18 @@ final class SecretStore {
 
     // MARK: - iCloud Keychain
 
+    /// For a copy of KeyBar that can't reach iCloud Keychain while sync is
+    /// on: shows this Mac's keys, and leaves the list of keys on disk alone,
+    /// so the iCloud keys' details are still there for a copy that can
+    func useThisMacOnlyForNow() {
+        live?.syncs = false
+        indexIsReadOnly = true
+        records = merge(records)
+    }
+
+    /// See `useThisMacOnlyForNow`
+    private var indexIsReadOnly = false
+
     /// Picks up keys added, changed or deleted on another Mac
     func refresh() {
         let merged = merge(records)
@@ -468,30 +480,53 @@ final class SecretStore {
     /// iCloud already has under the same name with another value (from
     /// another Mac) keeps that name; this Mac's copy gets a new one.
     /// Returns those renames, old name to new.
+    ///
+    /// Every key is copied before any is deleted here, and syncing starts
+    /// before the deletes: a failure part way through leaves the keys where
+    /// they were (the copies made so far are taken back out of iCloud).
     @discardableResult
     func moveToICloud(_ live: LiveVault) throws -> [String: String] {
         var renamed: [String: String] = [:]
         let theirs = Set(try live.iCloud.names())
         var taken = theirs.union(try live.thisMac.names()).union(records.map(\.name))
-        for name in try live.thisMac.names().sorted() {
-            guard let value = try live.thisMac.read(name) else { continue }
-            var target = name
-            if theirs.contains(name), let existing = try live.iCloud.read(name), existing != value {
-                target = Self.freeName(name, taken: taken)
-                taken.insert(target)
-                renamed[name] = target
+        var copied: [(name: String, target: String)] = []
+        do {
+            for name in try live.thisMac.names().sorted() {
+                guard let value = try live.thisMac.read(name) else { continue }
+                var target = name
+                if theirs.contains(name), let existing = try live.iCloud.read(name), existing != value {
+                    target = Self.freeName(name, taken: taken)
+                    taken.insert(target)
+                    renamed[name] = target
+                }
+                try live.iCloud.write(target, value: value)
+                copied.append((name, target))
             }
-            try live.iCloud.write(target, value: value)
-            try live.thisMac.delete(name)
-            if target != name, var record = record(name) {
-                records.removeAll { $0.name == name }
-                record.name = target
-                records.append(record)
-            }
+        } catch {
+            for copy in copied where !theirs.contains(copy.target) { try? live.iCloud.delete(copy.target) }
+            throw error
         }
+
+        for copy in copied where copy.target != copy.name {
+            guard var record = record(copy.name) else { continue }
+            records.removeAll { $0.name == copy.name }
+            record.name = copy.target
+            records.append(record)
+        }
+        // Syncing on before the deletes, so every key can still be read if
+        // one fails. A copy left here is harmless (keys are read from both
+        // places), though a renamed one shows up under both names.
         live.syncs = true
+        var left: [String] = []
+        for copy in copied {
+            do { try live.thisMac.delete(copy.name) } catch { left.append(copy.name) }
+        }
+        // Pushes the details (groups, folder limits) to the iCloud items
         records = merge(records)
         save()
+        if !left.isEmpty {
+            lastError = "Couldn't remove this Mac's copy of \(left.joined(separator: ", ")). They're in iCloud Keychain too."
+        }
         return renamed
     }
 
@@ -572,7 +607,7 @@ final class SecretStore {
     }
 
     private func save() {
-        guard let indexURL else { return }
+        guard let indexURL, !indexIsReadOnly else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

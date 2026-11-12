@@ -38,6 +38,16 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
 - Don't connect Ross's real Claude Code from a dev build: it would register the build/dd path.
 
 ## Where we left off (2026-11-11)
+- **2026-11-12: fixes from a code review on main, waiting for Ross to release (next 1.4.x).** .env Import
+  skips `keybar:` pointers (they overwrote real keys); moving keys to iCloud copies all first, deletes last
+  (a failure moves nothing); a proxied key whose proxy can't be set up is refused, never handed over (the
+  bridge checks `proxied`, not `usesProxy`); Touch ID prompt squeezes spaces, strips bidi/control
+  characters and shows a long command's start and end; `keybar run` checks the process ancestry for
+  Claude Code (`ClaudeCodeCheck`), needs a terminal, and an approval only covers that tty (still beatable
+  by a detached process reading the user's tty, so not airtight); proxy rejects negative/huge lengths
+  (crash); Test and the proxy only send a key to a service when its name names exactly one
+  (`ServiceCatalog.destination`); a copy without iCloud leaves the sync setting and index.json alone;
+  .env swap writes through symlinks; one-word file keys are redacted whole. Tests: `ReviewFixTests`.
 - v0.1.0 in the repo, not released. All features of Claude Keychain plus: Touch ID approval for
   Claude's uses (on by default, 15 min, scoped to client + project + keys, prompt shows the command),
   client names in the log, redaction of reversed and embedded-base64 copies, 468 services, key-shape

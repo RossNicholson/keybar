@@ -23,6 +23,12 @@ enum EnvFile {
         return SecretName.isValid(name) ? name : nil
     }
 
+    /// The entries that hold a value worth storing: not `keybar:` pointers to
+    /// a stored key, which would overwrite the real key with the pointer
+    static func importable(_ entries: [Entry]) -> [Entry] {
+        entries.filter { !$0.value.hasPrefix(referencePrefix) }
+    }
+
     static func parse(_ text: String) -> [Entry] {
         var entries: [Entry] = []
         let lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")

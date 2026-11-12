@@ -37,7 +37,9 @@ struct SettingsView: View {
             SettingToggle(title: "Sync with iCloud Keychain",
                           detail: state.canSync
                             ? "Keys, with their groups, notes and folders, go to iCloud Keychain, so KeyBar on each Mac signed in to your Apple Account has them. Apple encrypts them end to end. Needs Passwords & Keychain on in System Settings → Apple Account → iCloud."
-                            : "This copy of KeyBar can't use iCloud Keychain. The version from Homebrew or GitHub can.",
+                            : settings.syncWithICloud
+                              ? "This copy of KeyBar can't use iCloud Keychain, so it only shows this Mac's keys. Sync stays on for the version from Homebrew or GitHub."
+                              : "This copy of KeyBar can't use iCloud Keychain. The version from Homebrew or GitHub can.",
                           isOn: Binding(get: { settings.syncWithICloud }, set: { on in Task { await state.setSync(on) } })) {
                 if state.isMovingKeys { SettingNote("Moving keys…") }
                 if let note = state.syncNote { SettingNote(note) }

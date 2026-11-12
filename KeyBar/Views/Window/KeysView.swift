@@ -122,9 +122,14 @@ struct KeysView: View {
             importError = "Couldn't read \(url.lastPathComponent)."
             return
         }
-        let entries = EnvFile.parse(text)
-        guard !entries.isEmpty else {
+        let parsed = EnvFile.parse(text)
+        guard !parsed.isEmpty else {
             importError = "\(url.lastPathComponent) has no NAME=value lines."
+            return
+        }
+        let entries = EnvFile.importable(parsed)
+        guard !entries.isEmpty else {
+            importError = "\(url.lastPathComponent) only points to keys already in KeyBar."
             return
         }
         importing = ImportRequest(file: url, entries: entries)

@@ -202,17 +202,33 @@ final class BridgePolicy {
             return nil
         }
         let names = (request.names ?? []).sorted().joined(separator: ", ")
-        // The whole command, not just its program: `wrangler --version; curl …`
-        // mustn't pass as "run wrangler"
-        var command = (request.command ?? "").split(whereSeparator: \.isNewline).joined(separator: " ⏎ ")
-        if command.count > Self.promptCommandLength {
-            command = String(command.prefix(Self.promptCommandLength)) + "…"
-        }
+        let command = Self.promptCommand(request.command ?? "")
         let folder = Self.tidy(request.projectFolder ?? request.cwd)
         if request.client == Bridge.terminalClient {
             return "give \(names) to a command in \(folder) (keybar run): \(command)"
         }
         return "let \(request.client) use \(names) in \(folder) to run: \(command)"
+    }
+
+    /// A command as the Touch ID prompt shows it. The whole command, not just
+    /// its program: `wrangler --version; curl …` mustn't pass as "run
+    /// wrangler". Runs of spaces are squeezed and invisible characters
+    /// (direction overrides and the like) taken out, so nothing can be pushed
+    /// out of sight or reordered; a long one shows its start and its end.
+    static func promptCommand(_ command: String) -> String {
+        let visible = String(String.UnicodeScalarView(command.unicodeScalars.compactMap { scalar -> Unicode.Scalar? in
+            if scalar == "\n" || scalar == "\r" { return "\n" }
+            if scalar.properties.generalCategory == .control || scalar.properties.generalCategory == .format { return " " }
+            return scalar
+        }))
+        let lines = visible.split(whereSeparator: \.isNewline).map {
+            $0.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }.filter { !$0.isEmpty }
+        let tidy = lines.joined(separator: " ⏎ ")
+        guard tidy.count > promptCommandLength else { return tidy }
+        let tail = promptCommandLength / 3
+        return String(tidy.prefix(promptCommandLength - tail)) + " … " + String(tidy.suffix(tail))
+            + " (\(tidy.count) characters)"
     }
 
     /// How long one approval lasts. `keybar run` always asks (15 minutes at
@@ -227,16 +243,20 @@ final class BridgePolicy {
         } else if !keys.isEmpty && keys.count == (request.names ?? []).count && keys.allSatisfy({ $0 == .never }) {
             setting = 0
         }
-        guard request.client == Bridge.terminalClient, setting == 0 else { return setting }
+        guard request.client == Bridge.terminalClient else { return setting }
+        // Without its terminal an approval couldn't be kept to it: ask each time
+        if request.terminal == nil { return -1 }
+        guard setting == 0 else { return setting }
         return 900
     }
 
     /// One approval covers the same client using the same keys from the same
     /// project, not every key for everyone. For `keybar run` it covers only
-    /// the same command: approving `npm run dev` doesn't approve `printenv`.
-    private static func approvalScope(_ request: BridgeRequest) -> String {
+    /// the same command in the same terminal: approving `npm run dev` doesn't
+    /// approve `printenv`, or `npm run dev` started from anywhere else.
+    static func approvalScope(_ request: BridgeRequest) -> String {
         var parts = [request.client, request.projectFolder ?? request.cwd, (request.names ?? []).sorted().joined(separator: ",")]
-        if request.client == Bridge.terminalClient { parts.append(request.command ?? "") }
+        if request.client == Bridge.terminalClient { parts += [request.command ?? "", request.terminal ?? ""] }
         return parts.joined(separator: "\u{1F}")
     }
 
@@ -315,20 +335,35 @@ final class BridgePolicy {
                 return .failure(problem)
             }
         }
-        store.markUsed(names)
         let runID = UUID().uuidString
         // Proxied keys: the command gets a placeholder and a local address,
-        // and KeyBar adds the key to its requests
+        // and KeyBar adds the key to its requests. If that can't be set up the
+        // command is refused, never given the real key instead.
         var environment: [String: String] = [:]
-        if let proxy {
-            for name in names {
-                guard let record = store.record(name), record.usesProxy, let route = KeyProxy.route(for: record),
-                      environment[route.variable] == nil, let value = values[name],
-                      let base = proxy.grant(name: name, value: value, route: route, runID: runID) else { continue }
-                environment[route.variable] = base
-                values[name] = Bridge.proxyPlaceholder
+        for name in names {
+            // What the user chose, not whether it can still be proxied
+            guard let record = store.record(name), record.proxied == true else { continue }
+            var problem: String?
+            if let route = KeyProxy.route(for: record), let value = values[name] {
+                if environment[route.variable] != nil {
+                    problem = "Only one key at a time can go through KeyBar's proxy as \(route.variable). Use \(name) in a command of its own."
+                } else if let base = proxy?.grant(name: name, value: value, route: route, runID: runID) {
+                    environment[route.variable] = base
+                    values[name] = Bridge.proxyPlaceholder
+                } else {
+                    problem = "KeyBar's proxy for \(name) couldn't start, so it wasn't used. Try again, or ask the user to check KeyBar."
+                }
+            } else {
+                problem = "\(name) is set to go through KeyBar's proxy, but KeyBar can't proxy it any more, so it wasn't used. "
+                    + "Ask the user to check the key in KeyBar."
+            }
+            if let problem {
+                proxy?.revoke(runID: runID)
+                log.add(entry(.refused, request, detail: problem))
+                return .failure(problem)
             }
         }
+        store.markUsed(names)
         running[runID] = log.add(entry(.ran, request, detail: "Running…"))
         let files = Dictionary(uniqueKeysWithValues: names.compactMap { name in store.record(name)?.fileName.map { (name, $0) } })
         return BridgeReply(ok: true, values: values, files: files.isEmpty ? nil : files, runID: runID,

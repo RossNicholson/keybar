@@ -276,8 +276,10 @@ final class TerminalPolicyTests: XCTestCase {
         defer { settings.approvalSeconds = saved }   // the test host shares the app's defaults
         let policy = BridgePolicy(store: store, log: ActivityLog(url: nil), settings: settings)
         func run(_ command: String) -> BridgeRequest {
-            BridgeRequest(action: .resolve, cwd: "/tmp", projectFolder: "/tmp", client: Bridge.terminalClient,
-                          names: ["GITHUB_TOKEN"], command: command)
+            var request = BridgeRequest(action: .resolve, cwd: "/tmp", projectFolder: "/tmp", client: Bridge.terminalClient,
+                                        names: ["GITHUB_TOKEN"], command: command)
+            request.terminal = "/dev/ttys001"
+            return request
         }
 
         settings.approvalSeconds = 0

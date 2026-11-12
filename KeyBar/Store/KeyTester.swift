@@ -70,11 +70,12 @@ enum KeyTester {
 
     /// Whether Test can check this key
     static func canTest(_ record: SecretRecord) -> Bool {
-        !record.isFile && record.service.map { checks[$0.name] != nil } == true
+        !record.isFile && ServiceCatalog.destination(for: record.name, among: Set(checks.keys)) != nil
     }
 
     static func test(_ record: SecretRecord, value: String) async -> Result? {
-        guard !record.isFile, let service = record.service, let check = checks[service.name],
+        guard !record.isFile, let service = ServiceCatalog.destination(for: record.name, among: Set(checks.keys)),
+              let check = checks[service.name],
               let url = URL(string: check.url) else { return nil }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         for (header, template) in check.headers {

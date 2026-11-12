@@ -95,6 +95,9 @@ struct BridgeRequest: Codable, Sendable {
     var reason: String? = nil
     /// For `check`: file → the text to look in
     var texts: [String: String]? = nil
+    /// For `keybar run`: the terminal it was typed in, which an approval is
+    /// limited to
+    var terminal: String? = nil
 }
 
 /// A stored key as the helper sees it: everything but the value

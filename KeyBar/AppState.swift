@@ -86,12 +86,10 @@ final class AppState {
         self.claude = claude
         self.aiApps = aiApps ?? AIApps()
         canSync = store.live?.iCloudAvailable ?? false
-        // A build that can't reach iCloud Keychain uses this Mac's keys
-        if store.syncs && !canSync {
-            store.live?.syncs = false
-            settings.syncWithICloud = false
-            store.refresh()
-        }
+        // A build that can't reach iCloud Keychain uses this Mac's keys, for
+        // this run only: the setting and the list of keys are shared with
+        // the installed KeyBar, which can
+        if store.syncs && !canSync { store.useThisMacOnlyForNow() }
         reminders = ExpiryReminders(store: store, settings: settings)
         reminders?.check()
         reminderTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -399,7 +397,7 @@ final class AppState {
 
     func importEntries(_ entries: [EnvFile.Entry], group: String?, from file: String) throws -> Int {
         var imported: [String] = []
-        for entry in entries {
+        for entry in EnvFile.importable(entries) {
             try store.add(name: entry.name, value: entry.value, group: group, note: nil, replacing: true)
             imported.append(entry.name)
         }
@@ -484,11 +482,9 @@ final class AppState {
                 let rewrite = EnvRewriter.rewrite(text, references: references)
                 result.skipped += rewrite.skipped.map { "\($0) in \(label)" }
                 guard !rewrite.swapped.isEmpty else { continue }
-                let permissions = (try? FileManager.default.attributesOfItem(atPath: path))?[.posixPermissions]
-                try Data(rewrite.text.utf8).write(to: url, options: .atomic)
-                if let permissions {
-                    try? FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: path)
-                }
+                // Into the real file: replacing a symlinked .env would leave the
+                // keys in the file it points to
+                try ClaudeConnector.replaceFile(url, with: Data(rewrite.text.utf8))
                 result.files += 1
                 result.swapped += rewrite.swapped.count
                 log.log(.changed, rewrite.swapped.compactMap { references[$0]?.stored },
@@ -525,7 +521,9 @@ final class AppState {
                 log.log(.changed, store.records.map(\.name), detail: "Kept on this Mac only")
             }
         } catch {
-            syncNote = "Couldn't finish: \(error.localizedDescription) Nothing was lost; keys are read from both places."
+            syncNote = on
+                ? "Couldn't move your keys: \(error.localizedDescription) Nothing was moved; they're still on this Mac."
+                : "Couldn't finish: \(error.localizedDescription) Nothing was lost; keys are read from both places."
         }
         settings.syncWithICloud = store.syncs
     }

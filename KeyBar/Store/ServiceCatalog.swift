@@ -32,6 +32,32 @@ enum ServiceCatalog {
         return best?.service
     }
 
+    /// Every service named anywhere in a key's name
+    static func allMatches(_ keyName: String) -> Set<String> {
+        let words = keyName.uppercased().split(separator: "_").map(String.init)
+        var found = Set<String>()
+        for (prefix, service) in index {
+            let prefixWords = prefix.split(separator: "_").map(String.init)
+            guard prefixWords.count <= words.count else { continue }
+            for start in 0...(words.count - prefixWords.count)
+            where Array(words[start..<(start + prefixWords.count)]) == prefixWords {
+                found.insert(service.name)
+                break
+            }
+        }
+        return found
+    }
+
+    /// The service a key may be sent to, out of `services` (the ones Test can
+    /// check, or the proxy can reach): only when its name points to exactly
+    /// one of them. SLACK_BOT_OPENAI_API_KEY (Find keys puts the project's
+    /// name first) could be either, so it goes to neither.
+    static func destination(for keyName: String, among services: Set<String>) -> Service? {
+        guard let service = match(keyName), services.contains(service.name),
+              allMatches(keyName).intersection(services) == [service.name] else { return nil }
+        return service
+    }
+
     private static let index: [(String, Service)] = all.flatMap { service in service.prefixes.map { ($0, service) } }
 
     static var count: Int { all.count }

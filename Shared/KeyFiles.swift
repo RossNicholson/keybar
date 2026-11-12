@@ -44,10 +44,13 @@ final class KeyFiles {
     /// The parts of a file key worth hiding in output: long runs with no
     /// spaces (private key lines, IDs, tokens), not the whole file, so the
     /// ordinary words a JSON key file shares with everything else aren't
-    /// blanked out
+    /// blanked out. A file that's one word (a password or token on its own)
+    /// is hidden whole, however short.
     static func secretParts(of contents: String) -> [String] {
         let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\",{}[]"))
         var parts = Set<String>()
+        let whole = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !whole.isEmpty, whole.rangeOfCharacter(from: .whitespacesAndNewlines) == nil { parts.insert(whole) }
         for line in contents.replacingOccurrences(of: "\\n", with: "\n").components(separatedBy: .newlines) {
             for piece in line.components(separatedBy: separators) {
                 let trimmed = piece.trimmingCharacters(in: CharacterSet(charactersIn: ":;"))

@@ -9,7 +9,7 @@ enum Needles {
 
     static func of(_ record: SecretRecord, value: String) -> [String] {
         if CredentialKind.isIdentifier(record.name) { return [] }
-        if record.isFile { return KeyFiles.secretParts(of: value) }
+        if record.isFile { return KeyFiles.secretParts(of: value).filter { $0.count >= minLength } }
         return value.count >= minLength ? [value] : []
     }
 

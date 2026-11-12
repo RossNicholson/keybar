@@ -40,19 +40,25 @@ enum TerminalRun {
             fail("\(error)", code: 64)
         }
 
-        // Claude Code marks the commands it runs. Its way to use keys is the
-        // run_with_secrets tool, which hides them in what Claude reads back.
-        if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil {
+        // Claude Code's way to use keys is the run_with_secrets tool, which
+        // hides them in what Claude reads back
+        if ClaudeCodeCheck.isInsideClaudeCode() {
             fail("keybar run is for your own terminal. From Claude Code, use KeyBar's run_with_secrets tool, "
                 + "which keeps keys out of the output.", code: 77)
+        }
+        // An approval only covers the terminal it was given in, so a command
+        // run from somewhere else can't ride on it
+        guard let terminal = terminalName() else {
+            fail("keybar run is for your own terminal, and this isn't running in one.", code: 77)
         }
 
         let reply: BridgeReply
         do {
-            reply = try AppLink.send(BridgeRequest(action: .resolve, cwd: folder, projectFolder: folder,
-                                                   client: Bridge.terminalClient, names: plan.storedNames,
-                                                   command: plan.commandLine),
-                                     timeout: Bridge.resolveTimeout)
+            var request = BridgeRequest(action: .resolve, cwd: folder, projectFolder: folder,
+                                        client: Bridge.terminalClient, names: plan.storedNames,
+                                        command: plan.commandLine)
+            request.terminal = terminal
+            reply = try AppLink.send(request, timeout: Bridge.resolveTimeout)
         } catch {
             fail("\(error)", code: 69)
         }
@@ -80,6 +86,15 @@ enum TerminalRun {
         _ = try? AppLink.send(BridgeRequest(action: .finished, cwd: folder, client: Bridge.terminalClient,
                                             runID: reply.runID, exitCode: status), timeout: 5)
         exit(status)
+    }
+
+    /// The terminal this was typed in (e.g. /dev/ttys003), or nil if none of
+    /// its input and output is one
+    private static func terminalName() -> String? {
+        for descriptor in [STDIN_FILENO, STDERR_FILENO, STDOUT_FILENO] where isatty(descriptor) == 1 {
+            if let name = ttyname(descriptor) { return String(cString: name) }
+        }
+        return nil
     }
 
     private static func fail(_ message: String, code: Int32) -> Never {
