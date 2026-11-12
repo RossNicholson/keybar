@@ -5,7 +5,7 @@ import Observation
 /// command, which program it ran. Never the key's value.
 struct ActivityEntry: Codable, Identifiable, Hashable, Sendable {
     enum Action: String, Codable, Sendable {
-        case ran, refused, revealed, copied, added, changed, renamed, deleted, imported, deletedEverything
+        case ran, refused, revealed, copied, added, changed, renamed, deleted, imported, deletedEverything, sent, requested, tested
     }
 
     enum Source: String, Codable, Sendable {
@@ -46,6 +46,9 @@ struct ActivityEntry: Codable, Identifiable, Hashable, Sendable {
         case .deleted: return "Deleted"
         case .imported: return "Imported"
         case .deletedEverything: return "Deleted everything"
+        case .sent: return "Sent"
+        case .requested: return "Asked for"
+        case .tested: return "Tested"
         }
     }
 }

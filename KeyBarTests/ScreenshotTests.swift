@@ -62,6 +62,22 @@ final class ScreenshotTests: XCTestCase {
         try Snapshot.panel(to: out.appendingPathComponent("window-add.png")) {
             AddKeyView {}.environment(state)
         }
+        try Snapshot.panel(to: out.appendingPathComponent("window-edit-github.png")) {
+            KeyEditor(record: state.store.record("GITHUB_TOKEN")!) {}.environment(state)
+        }
+        try Snapshot.panel(to: out.appendingPathComponent("window-edit-file.png")) {
+            KeyEditor(record: state.store.record("GOOGLE_SERVICE_ACCOUNT")!) {}.environment(state)
+        }
+        try Snapshot.panel(to: out.appendingPathComponent("window-send.png")) {
+            SendKeyView(name: "GITHUB_TOKEN") {}.environment(state)
+        }
+        let request = KeyRequest(name: "CLOUDFLARE_API_TOKEN",
+                                 reason: "To deploy the contact-form Worker with wrangler. Make one at dash.cloudflare.com → My Profile → API Tokens, with Workers Scripts: Edit.", client: "Claude Code")
+        try Snapshot.panel(to: out.appendingPathComponent("window-add-request.png")) {
+            AddKeyView(request: request) {}.environment(state)
+        }
+        try Snapshot.png(QuickCopyView(close: {}, copy: { _ in }).environment(state), size: QuickCopyView.size,
+                         to: out.appendingPathComponent("quick-copy.png"))
         try Snapshot.panel(to: out.appendingPathComponent("window-find.png")) {
             FindKeysView {}.environment(state)
         }

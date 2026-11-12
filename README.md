@@ -63,12 +63,14 @@ To connect by hand:
 claude mcp add --scope user keybar -- /Applications/KeyBar.app/Contents/Helpers/keybar mcp
 ```
 
-### The two tools
+### The tools
 
 | Tool | What it does |
 |---|---|
-| `list_secrets` | The stored keys' names, services and kinds (e.g. `CLOUDFLARE_API_TOKEN: Cloudflare API token`). Never values. |
+| `list_secrets` | The stored keys' names, services and kinds (e.g. `CLOUDFLARE_API_TOKEN: Cloudflare API token`), and which are files or expire soon. Never values. |
 | `run_with_secrets` | Runs a shell command with the named keys set as environment variables. Returns the exit code, stdout and stderr, with every copy of a key replaced by `[REDACTED]`. |
+| `request_secret` | Asks you for a key KeyBar doesn't have. KeyBar opens *Add key* with the name filled in and Claude's reason (what it's for, where to make one) above it. You paste the key; Claude only hears that it's stored. |
+| `send_secret` | Sends a stored key to a GitHub repo's Actions secrets, or a Cloudflare Worker or Pages project, so a deploy can use it. Always asks with Touch ID, whatever *Ask before Claude uses a key* is set to. |
 
 Other MCP clients can use the same server; the activity log shows them by name.
 
@@ -96,6 +98,30 @@ keybar run --env-file .env.production -- npm start
 
 KeyBar asks with Touch ID first and shows the command. One yes covers that exact command in that folder for 15 minutes; `keybar run` always asks, whatever Settings says about Claude, because its output isn't redacted. Other lines in the `.env` are set too, unless they're set already, the way dotenv does it, so tools that read `.env` themselves (Next.js, Vite, dotenv) keep working: the real values are already in the environment. Folder limits apply, and inside Claude Code `keybar run` refuses and points Claude to `run_with_secrets`.
 
+## Send keys to GitHub and Cloudflare
+
+Open a key, click **Send to GitHub or Cloudflare…** and tick the repos (or type a Worker or Pages project). After one Touch ID, KeyBar runs `gh secret set` or `wrangler secret put` with the value on the tool's standard input, so it's never on screen or in the process list. KeyBar remembers where each key went: after you paste in a new value, **Send again** puts it everywhere it was.
+
+It needs [gh](https://cli.github.com) signed in (`gh auth login`) for GitHub, and [wrangler](https://developers.cloudflare.com/workers/wrangler/) signed in (`wrangler login`) for Cloudflare. Without wrangler installed, KeyBar uses `npx wrangler`.
+
+## File keys
+
+Some keys are files: a Google service account's `.json`, Apple's `AuthKey_….p8`, a `.pem`. In *Add key*, click **Or choose a file…** (up to 64 KB). The file's contents go into the Keychain like any key. When a command uses it, the environment variable is the **path** to a private copy (readable only by you, in a folder only you can open), deleted as soon as the command ends:
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS="$GSC_KEY" python report.py
+```
+
+## Expiry, testing and tidying
+
+- **Expiry dates.** Give a key the date it expires and KeyBar sends a notification two weeks before and on the day, and tags it in the list.
+- **Test.** Click **Test** on a key and KeyBar asks that key's own service if it still works (Anthropic, OpenAI, GitHub, Cloudflare, Stripe and others), with a read-only call. GitHub and Cloudflare tokens report their expiry date, which KeyBar fills in. Nothing goes over the network until you click.
+- **Unused keys.** A key that no command on this Mac has used for 90 days gets a nudge to archive it, so it's out of Claude's reach until it's needed. *Keep* stops the nudge for those keys.
+
+## Quick copy: ⌥⌘K
+
+Press **⌥⌘K** in any app, type a few letters of a key's name, then press Return to copy it after Touch ID. Use the arrow keys to pick and Esc to close. You can turn it off in Settings.
+
 ## Sync with your other Macs
 
 Turn on **Settings → Sync with iCloud Keychain** and KeyBar moves your keys into iCloud Keychain, so KeyBar on every Mac signed in to your Apple Account has the same keys, with their groups, notes, folder limits and archived state. Apple encrypts iCloud Keychain end to end. It needs *Passwords & Keychain* turned on in System Settings → Apple Account → iCloud.
@@ -104,6 +130,7 @@ Turn on **Settings → Sync with iCloud Keychain** and KeyBar moves your keys in
 - If two Macs had different keys under the same name, the one already in iCloud keeps the name and the other gets `_2` on the end. KeyBar tells you which.
 - Turning sync off keeps a copy of every key on this Mac. The iCloud copies stay for your other Macs.
 - With sync on, *Delete everything* deletes the keys from all your Macs.
+- Expiry dates, file names and where a key was sent sync too.
 - Activity and when a key was last used stay on each Mac.
 
 Sync needs KeyBar's provisioning profile, which only the builds from Homebrew and GitHub releases have. A copy built from source keeps keys on its own Mac.
@@ -145,17 +172,18 @@ Sync needs KeyBar's provisioning profile, which only the builds from Homebrew an
 
 ## Privacy
 
-KeyBar makes no network requests of its own except checking for updates (Homebrew's index, or GitHub's latest release for a DMG install). No analytics, no crash reporter, no account. Service recognition is built in. With sync on, macOS's iCloud Keychain carries the keys between your Macs; KeyBar never sees that traffic.
+KeyBar makes no network requests of its own except checking for updates (Homebrew's index, or GitHub's latest release for a DMG install), and two you start yourself: **Test** sends the key to its own service only, and **Send** runs `gh` or `wrangler`, which talk to GitHub or Cloudflare. No analytics, no crash reporter, no account. Service recognition is built in. With sync on, macOS's iCloud Keychain carries the keys between your Macs; KeyBar never sees that traffic.
 
 Local files, all readable only by you:
 
 | What | Where |
 |---|---|
 | Key values | Your login keychain, or iCloud Keychain with sync on |
-| Synced details (group, note, folders) | With each key in iCloud Keychain, with sync on |
+| Synced details (group, note, folders, expiry, where sent) | With each key in iCloud Keychain, with sync on |
 | Names, groups, notes, folders | `~/.keybar/index.json` |
 | Activity log (no values) | `~/.keybar/activity.json` |
 | The socket the helper uses | `~/.keybar/keybar.sock` |
+| File keys while a command runs | A private folder in your temporary folder, deleted when it ends |
 | Claude Code connection | `~/.claude.json` and, if you choose, a marked note in `~/.claude/CLAUDE.md` |
 
 ## Uninstalling

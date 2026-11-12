@@ -113,6 +113,8 @@ final class BridgePolicy {
         case .list: return list(request)
         case .resolve: return resolve(request)
         case .finished: return finished(request)
+        // The app delegate runs these: they wait on the user, off the main thread
+        case .send, .request: return .failure("KeyBar couldn't handle that request.")
         }
     }
 
@@ -141,7 +143,8 @@ final class BridgePolicy {
         let secrets = store.active.map { record in
             SecretSummary(name: record.name, service: record.service?.name, kind: record.kind,
                           group: record.group, note: record.note, restricted: record.isRestricted,
-                          availableHere: isAvailable(record, for: request))
+                          availableHere: isAvailable(record, for: request), fileName: record.fileName,
+                          expiresAt: record.expiresAt)
         }
         return BridgeReply(ok: true, secrets: secrets)
     }
@@ -155,6 +158,13 @@ final class BridgePolicy {
     /// it needn't ask (it's not a use, it'll be refused anyway, approval is
     /// off, or the user approved the same use recently enough)
     func approvalPrompt(for request: BridgeRequest) -> String? {
+        if request.action == .send {
+            // Always asks: the key leaves the Mac
+            guard let destination = request.destination, problem(with: request) == nil, destination.problem == nil else { return nil }
+            let name = request.names?.first ?? ""
+            return "let \(request.client) send \(name) to \(destination.label)"
+                + (destination.secretName == name ? "" : " as \(destination.secretName)")
+        }
         guard request.action == .resolve, let settings, problem(with: request) == nil else { return nil }
         let seconds = Self.approvalSeconds(for: request, setting: settings.approvalSeconds)
         guard seconds != 0 else { return nil }
@@ -266,7 +276,39 @@ final class BridgePolicy {
         store.markUsed(names)
         let runID = UUID().uuidString
         running[runID] = log.add(entry(.ran, request, detail: "Running…"))
-        return BridgeReply(ok: true, values: values, runID: runID)
+        let files = Dictionary(uniqueKeysWithValues: names.compactMap { name in store.record(name)?.fileName.map { (name, $0) } })
+        return BridgeReply(ok: true, values: values, files: files.isEmpty ? nil : files, runID: runID)
+    }
+
+    // MARK: - Sending keys
+
+    /// Why a send request can't go ahead, or nil if it can (once approved)
+    func sendProblem(_ request: BridgeRequest) -> String? {
+        guard request.names?.count == 1 else { return "Send one key at a time." }
+        guard let destination = request.destination else { return "Say where to send it." }
+        if let problem = destination.problem { return problem }
+        return problem(with: request)?.message
+    }
+
+    /// Logs a send that was turned away
+    func refuseSend(_ request: BridgeRequest, _ reason: String) -> BridgeReply {
+        log.add(entry(.refused, request, detail: reason, showCommand: false))
+        return .failure(reason)
+    }
+
+    // MARK: - Keys Claude asks for
+
+    /// Why Claude can't ask for this key, or what to tell it straight away
+    /// (nil: show the Add window)
+    func requestAnswer(_ request: BridgeRequest) -> BridgeReply? {
+        guard let name = request.names?.first, request.names?.count == 1, SecretName.isValid(name) else {
+            return .failure("Ask for one key, by a name like CLOUDFLARE_API_TOKEN.")
+        }
+        if let record = store.record(name) {
+            if record.isArchived { return .failure("\(name) is archived in KeyBar. Ask the user to restore it.") }
+            return BridgeReply(ok: true, message: "\(name) is already in KeyBar. Use it with run_with_secrets.")
+        }
+        return nil
     }
 
     private func finished(_ request: BridgeRequest) -> BridgeReply {

@@ -26,6 +26,7 @@ struct KeysView: View {
             }
             if let importError { SettingNote(importError) }
             if let error = state.store.lastError { SettingNote(error) }
+            AttentionCards()
 
             if state.store.active.isEmpty && state.store.archived.isEmpty {
                 MessageCard(title: "No keys yet",
@@ -151,6 +152,18 @@ struct KeyRow: View {
                                 fill: AppColors.lilac)
                             .help(record.projectFolders.map(BridgePolicy.tidy).joined(separator: "\n"))
                     }
+                    if let fileName = record.fileName {
+                        TagPill(text: "file", fill: AppColors.periwinkle)
+                            .help("\(fileName): commands get the path to a private copy")
+                    }
+                    if !record.sentTo.isEmpty {
+                        TagPill(text: "sent to \(record.sentTo.count)", fill: AppColors.mint)
+                            .help(record.sentTo.map(\.label).joined(separator: "\n"))
+                    }
+                    if let expiry = KeyHealth.expiryText(record) {
+                        TagPill(text: expiry, fill: AppColors.coral)
+                            .help(record.expiresAt.map { "Expires \($0.formatted(date: .long, time: .omitted))" } ?? "")
+                    }
                 }
                 KeySubtitle(record: record)
                 if let note = record.note {
@@ -212,6 +225,15 @@ struct KeyEditor: View {
     @State private var error: String?
     /// The Keychain refused to delete it; offer to take it off the list instead
     @State private var deleteFailed = false
+    @State private var expires = false
+    @State private var expiresAt = Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now
+    /// A new file for a file key: its name and contents
+    @State private var newFile: (name: String, contents: String)?
+    @State private var testResult: KeyTester.Result?
+    @State private var testing = false
+    @State private var sending = false
+    /// Sends again, by destination ID: what happened
+    @State private var resent: [String: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -233,9 +255,20 @@ struct KeyEditor: View {
             field("Note", detail: "optional") {
                 HouseField(placeholder: "What it's for", text: $note, mono: false)
             }
-            field("New value", detail: "leave empty to keep the current one") {
-                HouseField(placeholder: "Paste a new value", text: $newValue, secure: true)
+            if let fileName = record.fileName {
+                field("File", detail: newFile == nil ? "commands get the path to a private copy" : "replaces \(fileName) when you save") {
+                    HStack(spacing: 8) {
+                        FileValueRow(fileName: newFile?.name ?? fileName, size: newFile?.contents.utf8.count)
+                        GhostButton(title: "New file…", symbol: "doc.badge.arrow.up") { chooseFile() }
+                            .fixedSize()
+                    }
+                }
+            } else {
+                field("New value", detail: "leave empty to keep the current one") {
+                    HouseField(placeholder: "Paste a new value", text: $newValue, secure: true)
+                }
             }
+            ExpiryField(on: $expires, date: $expiresAt)
 
             VStack(alignment: .leading, spacing: 6) {
                 FieldLabel(text: "Project folders",
@@ -260,6 +293,23 @@ struct KeyEditor: View {
                     .card(radius: Radius.small)
                 }
                 GhostButton(title: "Limit to a folder…", symbol: "folder.badge.plus") { chooseFolder() }
+            }
+
+            sentTo
+
+            HStack(spacing: 8) {
+                GhostButton(title: "Send to GitHub or Cloudflare…", symbol: "paperplane") { sending = true }
+                    .fixedSize()
+                if KeyTester.canTest(record) {
+                    GhostButton(title: testing ? "Testing…" : "Test", symbol: "checkmark.seal") { test() }
+                        .fixedSize()
+                        .disabled(testing)
+                        .help("Asks \(record.service?.name ?? "the service") whether the key works. Nothing is changed.")
+                }
+                Spacer(minLength: 0)
+            }
+            if let testResult {
+                SettingNote(testResult.summary + (testResult.expiresAt.map { " It expires \($0.formatted(date: .abbreviated, time: .omitted))." } ?? ""))
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -312,6 +362,83 @@ struct KeyEditor: View {
             group = record.group ?? ""
             note = record.note ?? ""
             folders = record.projectFolders
+            if let date = record.expiresAt {
+                expires = true
+                expiresAt = date
+            }
+        }
+        .sheet(isPresented: $sending) {
+            SendKeyView(name: record.name) { sending = false }
+                .environment(state)
+        }
+    }
+
+    /// Where the key has been sent, with Send again for after a new value
+    @ViewBuilder private var sentTo: some View {
+        let current = state.store.record(record.name) ?? record
+        if !current.sentTo.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                FieldLabel(text: "Sent to", detail: "send again after a new value")
+                ForEach(current.sentTo) { destination in
+                    HStack(spacing: 8) {
+                        Image(systemName: destination.kind == .githubActions ? "chevron.left.forwardslash.chevron.right" : "cloud.fill")
+                            .foregroundStyle(AppColors.secondaryText)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(destination.label + (destination.secretName == current.name ? "" : " as \(destination.secretName)"))
+                                .font(.mono(11))
+                                .foregroundStyle(AppColors.text)
+                                .lineLimit(1)
+                            Text(resent[destination.id] ?? destination.sentAt.map { "Sent \($0.formatted(.relative(presentation: .named)))" } ?? "")
+                                .font(.mono(9))
+                                .foregroundStyle(AppColors.secondaryText)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        GhostButton(title: "Send again", symbol: "arrow.clockwise") { sendAgain(destination) }
+                            .fixedSize()
+                        Button { state.store.forgetSend(current.name, destination) } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(AppColors.secondaryText)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Forget this one (it stays wherever it was sent)")
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .card(radius: Radius.small)
+                }
+            }
+        }
+    }
+
+    private func sendAgain(_ destination: Destination) {
+        resent[destination.id] = "Sending…"
+        Task {
+            switch await state.send(record.name, to: destination) {
+            case .success(let message): resent[destination.id] = message
+            case .failure(let error): resent[destination.id] = error.localizedDescription
+            }
+        }
+    }
+
+    private func test() {
+        testing = true
+        testResult = nil
+        Task {
+            testResult = await state.test(record.name)
+            testing = false
+            if let date = state.store.record(record.name)?.expiresAt, !expires {
+                expires = true
+                expiresAt = date
+            }
+        }
+    }
+
+    private func chooseFile() {
+        error = nil
+        guard let file = KeyFile.choose(title: "Choose a new file for \(record.name)") else { return }
+        switch file {
+        case .success(let (fileName, contents)): newFile = (fileName, contents)
+        case .failure(let problem): error = problem.localizedDescription
         }
     }
 
@@ -345,9 +472,12 @@ struct KeyEditor: View {
                 try state.rename(record.name, to: typed)
                 current = typed
             }
-            if !newValue.isEmpty {
+            if let newFile {
+                try state.replaceValue(current, with: newFile.contents, fileName: newFile.name)
+            } else if !newValue.isEmpty {
                 try state.replaceValue(current, with: newValue.trimmingCharacters(in: .whitespacesAndNewlines))
             }
+            state.setExpiry(current, expires ? expiresAt : nil)
             if var updated = state.store.record(current) {
                 let changed = updated.group != group.nonEmpty || updated.note != note.nonEmpty || updated.projectFolders != folders
                 updated.group = group
@@ -439,6 +569,39 @@ struct ImportView: View {
         .onAppear {
             chosen = Set(request.entries.map(\.name))
             group = request.file.deletingLastPathComponent().lastPathComponent
+        }
+    }
+}
+
+/// Keys that need looking at: expiring soon, or unused for months
+private struct AttentionCards: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        let expiring = state.store.active.filter(\.expiresSoon)
+        let unused = KeyHealth.unused(state.store.active).filter { !state.settings.keptUnused.contains($0.name) }
+        if !expiring.isEmpty {
+            AttentionBanner(symbol: "calendar.badge.exclamationmark",
+                            title: expiring.count == 1 ? "A key expires soon" : "\(expiring.count) keys expire soon",
+                            message: expiring.map { "\($0.name): \(KeyHealth.expiryText($0)?.lowercased() ?? "")" }.joined(separator: " · ")
+                                + ". Make a new one, paste it in with Edit, then Send again wherever it went.",
+                            fill: AppColors.coral) {
+                EmptyView()
+            }
+        }
+        if !unused.isEmpty {
+            AttentionBanner(symbol: "archivebox",
+                            title: unused.count == 1 ? "A key you haven't used" : "\(unused.count) keys you haven't used",
+                            message: unused.map(\.name).joined(separator: ", ")
+                                + ": not used by a command on this Mac for \(KeyHealth.unusedDays) days. Archive to keep \(unused.count == 1 ? "it" : "them") out of Claude's reach until needed?",
+                            fill: AppColors.butter) {
+                PillButton(title: "Archive", symbol: "archivebox") {
+                    for record in unused { state.setArchived(record.name, true) }
+                }
+                GhostButton(title: "Keep \(unused.count == 1 ? "it" : "them")") {
+                    state.settings.keptUnused += unused.map(\.name)
+                }
+            }
         }
     }
 }

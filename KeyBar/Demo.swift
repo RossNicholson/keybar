@@ -31,6 +31,15 @@ enum Demo {
             }
         }
         store.setArchived("HEROKU_API_KEY", true)
+        try? store.add(name: "GOOGLE_SERVICE_ACCOUNT", value: demoServiceAccount, group: "Website",
+                       note: "Search Console reports", fileName: "search-console.json")
+        store.setExpiry("GITHUB_TOKEN", Calendar.current.date(byAdding: .day, value: 9, to: Date()))
+        let week = Date().addingTimeInterval(-6 * 86_400)
+        for repo in ["RossNicholson/website", "RossNicholson/shop"] {
+            store.recordSend("GITHUB_TOKEN", to: Destination(kind: .githubActions, target: repo, secretName: "GH_TOKEN", sentAt: week))
+        }
+        store.recordSend("CLOUDFLARE_API_TOKEN", to: Destination(kind: .cloudflareWorker, target: "contact-form",
+                                                                 secretName: "CLOUDFLARE_API_TOKEN", sentAt: week))
         let log = ActivityLog(url: nil)
         let now = Date()
         log.replace(with: [
@@ -55,6 +64,12 @@ enum Demo {
         state.isDemo = true
         return state
     }
+
+    nonisolated static let demoServiceAccount = """
+    {"type": "service_account", "project_id": "demo-site", "private_key_id": "0123456789abcdef0123456789abcdef01234567",
+     "private_key": "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDdemo\\n-----END PRIVATE KEY-----\\n",
+     "client_email": "reports@demo-site.iam.gserviceaccount.com"}
+    """
 
     /// What Find keys might turn up on a Mac with the demo keys, for screenshots
     static func found() -> [FoundKey] {
