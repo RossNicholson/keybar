@@ -38,8 +38,8 @@ targets:
       path: KeyBar/Info.plist
       properties:
         CFBundleDisplayName: KeyBar
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "2"
         LSUIElement: true
         NSHighResolutionCapable: true
         LSMinimumSystemVersion: "14.0"
