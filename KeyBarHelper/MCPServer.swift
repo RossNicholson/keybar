@@ -23,7 +23,9 @@ final class MCPServer: @unchecked Sendable {
     Before asking the user to paste a key, or reading one from a .env file, call list_secrets to see what's stored. \
     To run a command that needs a key, call run_with_secrets with the key names: each one is set as an environment \
     variable of that name, so refer to it as "$NAME" in the command. Never put a key's value in a command, and never \
-    try to print, echo or save a key. Output comes back with any copy of a key replaced by [REDACTED].
+    try to print, echo or save a key. Output comes back with any copy of a key replaced by [REDACTED]. \
+    Don't run `keybar run` yourself: it's for the user's own terminal and doesn't hide keys. A .env line like \
+    NAME=keybar:STORED_NAME means the key is in KeyBar as STORED_NAME.
     """
 
     func run() {

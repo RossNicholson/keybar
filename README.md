@@ -72,6 +72,30 @@ claude mcp add --scope user keybar -- /Applications/KeyBar.app/Contents/Helpers/
 
 Other MCP clients can use the same server; the activity log shows them by name.
 
+## Find keys on this Mac
+
+Already have keys in `.env` files? **Keys → Find keys** looks through the folders you choose for `.env` files (and `.mcp.json`), plus `export` lines in `~/.zshrc` and friends, the env of MCP servers in `~/.claude.json`, `~/.aws/credentials` and `~/.npmrc`. It skips `node_modules`, builds, hidden folders and example files, and only lists things that look like keys.
+
+You tick what to import. The same value found in several projects becomes one key. When two projects use one name for different values, each gets its project's name in front (`SHOP_STRIPE_SECRET_KEY`, `BLOG_STRIPE_SECRET_KEY`), and you can rename them. Values KeyBar already has are marked as such.
+
+Then, if you like, KeyBar takes the keys out of your `.env` files: each value becomes a reference to where it's stored, and other lines stay as they are.
+
+```bash
+STRIPE_SECRET_KEY=keybar:SHOP_STRIPE_SECRET_KEY
+PORT=3000
+```
+
+## Run your own commands with keys: `keybar run`
+
+```bash
+keybar run -- npm run dev                                # keys from ./.env's keybar: lines
+keybar run --key CLOUDFLARE_API_TOKEN -- wrangler deploy  # or name them
+keybar run --key TOKEN=SHOP_API_TOKEN -- ./deploy.sh      # set a key under another name
+keybar run --env-file .env.production -- npm start
+```
+
+KeyBar asks with Touch ID first and shows the command. One yes covers that exact command in that folder for 15 minutes; `keybar run` always asks, whatever Settings says about Claude, because its output isn't redacted. Other lines in the `.env` are set too, unless they're set already, the way dotenv does it, so tools that read `.env` themselves (Next.js, Vite, dotenv) keep working: the real values are already in the environment. Folder limits apply, and inside Claude Code `keybar run` refuses and points Claude to `run_with_secrets`.
+
 ## Features
 
 - **Keychain storage.** Each key is its own item in your login keychain, named "KeyBar: NAME". Values are never written anywhere else.
@@ -83,7 +107,7 @@ Other MCP clients can use the same server; the activity log shows them by name.
 - **Touch ID for Claude, too.** Before Claude Code uses a key, KeyBar asks with Touch ID and shows the command it wants to run. By default one yes covers the same keys from the same project for 15 minutes; choose every time, an hour or never in Settings.
 - **Knows 468 services.** CLOUDFLARE_API_TOKEN is recognised as Cloudflare's API token, STRIPE_PUBLISHABLE_KEY as Stripe's publishable key. The list is built in, so recognising one never touches the network.
 - **Recognises pasted keys.** Paste `sk-ant-…`, `ghp_…`, `sk_live_…` and dozens more and the name is filled in for you. Paste a whole `NAME=value` line and both fields fill.
-- **Imports .env files.** Pick which lines to bring in, then delete the file.
+- **Imports .env files.** Pick which lines to bring in, then delete the file. Or let [Find keys](#find-keys-on-this-mac) find them all.
 - **Groups, order and notes.** Group keys by project (or leave them under their service), rename or ungroup a group, and put keys in your own order from the right-click menu. Search by name, service, group or note.
 - **Archive.** File away a key you're not using: it stays in the Keychain but Claude can't see or use it until you restore it.
 - **Menu bar dot.** A coral dot on the key while Claude Code isn't connected (you can turn it off).

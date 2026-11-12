@@ -62,6 +62,21 @@ final class ScreenshotTests: XCTestCase {
         try Snapshot.panel(to: out.appendingPathComponent("window-add.png")) {
             AddKeyView {}.environment(state)
         }
+        try Snapshot.panel(to: out.appendingPathComponent("window-find.png")) {
+            FindKeysView {}.environment(state)
+        }
+        let candidates = state.plan(Demo.found()).sorted { ($0.status == .stored ? 1 : 0, $0.whereFound) < ($1.status == .stored ? 1 : 0, $1.whereFound) }
+        try Snapshot.panel(to: out.appendingPathComponent("window-find-review.png")) {
+            FindKeysView(reviewing: candidates) {}.environment(state)
+        }
+        let imported = candidates.map { candidate in
+            var candidate = candidate
+            candidate.status = .stored
+            return candidate
+        }
+        try Snapshot.panel(to: out.appendingPathComponent("window-find-imported.png")) {
+            FindKeysView(reviewing: imported, imported: candidates.filter { $0.status != .stored }.count) {}.environment(state)
+        }
         // The mascot on its own, for the website
         try Snapshot.png(Mascot(size: 560, disc: nil).frame(width: 560, height: 560), size: NSSize(width: 560, height: 560),
                          to: out.appendingPathComponent("mascot.png"), transparent: true, exactPixels: true)

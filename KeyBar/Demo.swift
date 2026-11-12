@@ -55,4 +55,27 @@ enum Demo {
         state.isDemo = true
         return state
     }
+
+    /// What Find keys might turn up on a Mac with the demo keys, for screenshots
+    static func found() -> [FoundKey] {
+        let dev = "\(NSHomeDirectory())/Dev"
+        func env(_ project: String, _ file: String = ".env") -> KeySource {
+            KeySource(kind: .envFile, path: "\(dev)/\(project)/\(file)", project: project)
+        }
+        let claude = KeySource(kind: .claudeCode, path: "\(NSHomeDirectory())/.claude.json")
+        let aws = KeySource(kind: .aws, path: "\(NSHomeDirectory())/.aws/credentials")
+        return [
+            FoundKey(name: "STRIPE_SECRET_KEY", value: "sk_test_demo51H8xYzAbCdEfGhIjKlMnOpQr", source: env("shop")),
+            FoundKey(name: "STRIPE_WEBHOOK_SECRET", value: "whsec_demo0a1b2c3d4e5f6a7b8c9d", source: env("shop")),
+            FoundKey(name: "STRIPE_SECRET_KEY", value: "sk_test_demoBlogOther0123456789ab", source: env("blog")),
+            FoundKey(name: "DATABASE_URL", value: "postgres://blog:demo-pass-4821@db.internal/blog", source: env("blog", ".env.local")),
+            FoundKey(name: "SUPABASE_SERVICE_ROLE_KEY", value: "demo-supabase-service-role-9f8e7d6c", source: env("blog", ".env.local")),
+            FoundKey(name: "OPENAI_API_KEY", value: "sk-proj-demo-Ab12Cd34Ef56Gh78Ij90", source: env("blog")),
+            FoundKey(name: "OPENAI_API_KEY", value: "sk-proj-demo-Ab12Cd34Ef56Gh78Ij90", source: env("website")),
+            FoundKey(name: "SENTRY_AUTH_TOKEN", value: "sntrys_demo_0123456789abcdef", source: env("website")),
+            FoundKey(name: "LINEAR_API_KEY", value: "lin_api_demo0123456789abcdef", source: claude),
+            FoundKey(name: "AWS_ACCESS_KEY_ID", value: "AKIADEMODEMODEMODEMO", source: aws),
+            FoundKey(name: "AWS_SECRET_ACCESS_KEY", value: "demoSecretAccessKey0123456789abcdefghij", source: aws),
+        ]
+    }
 }

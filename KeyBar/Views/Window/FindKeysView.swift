@@ -18,6 +18,18 @@ struct FindKeysView: View {
     @State private var swap: AppState.SwapResult?
     @State private var error: String?
 
+    init(done: @escaping () -> Void) {
+        self.done = done
+    }
+
+    /// Opens on the list of found keys, or after importing them, for screenshots
+    init(reviewing candidates: [ScanCandidate], imported: Int? = nil, done: @escaping () -> Void) {
+        self.done = done
+        _candidates = State(initialValue: candidates)
+        _step = State(initialValue: imported == nil ? .review : .imported)
+        _importedCount = State(initialValue: imported ?? 0)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             switch step {
@@ -28,6 +40,10 @@ struct FindKeysView: View {
             }
         }
         .popoverChrome(width: 600)
+        .onAppear {
+            // Opened straight onto the last step (screenshots): every file ticked
+            if step == .imported && swap == nil { swapFiles = Set(state.swappableFiles(candidates)) }
+        }
     }
 
     // MARK: - Where to look
