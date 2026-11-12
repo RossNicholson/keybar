@@ -57,6 +57,10 @@ targets:
           CODE_SIGN_IDENTITY: "Developer ID Application"
           DEVELOPMENT_TEAM: "5HQ5V9NP82"
           ENABLE_HARDENED_RUNTIME: YES
+          # The profile allows the keychain group iCloud Keychain sync needs.
+          # scripts/release.sh installs it from signing/ before archiving.
+          CODE_SIGN_ENTITLEMENTS: KeyBar/KeyBar-Release.entitlements
+          PROVISIONING_PROFILE_SPECIFIER: "KeyBar Developer ID 2026-11"
     scheme:
       testTargets:
         - KeyBarTests

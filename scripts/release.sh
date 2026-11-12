@@ -20,6 +20,7 @@ USE_XCODEGEN=1                 # 1 = regenerate the .xcodeproj from project.yml
 RUN_TESTS=1                    # 1 = run unit tests before archiving
 DMG_APPLICATIONS_SYMLINK=1     # 1 = add an /Applications symlink in the DMG
 DEVELOPMENT_TEAM=""            # set (non-XcodeGen projects) to sign the archive via args
+SIGNING_PROFILE="signing/KeyBar.provisionprofile"  # the Developer ID profile for iCloud Keychain
 # -------------------------
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -49,6 +50,16 @@ if [[ "$RUN_TESTS" -eq 1 ]]; then
     -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -quiet || fail "tests failed"
 fi
 
+if [[ -n "$SIGNING_PROFILE" ]]; then
+  step "Installing the provisioning profile"
+  [[ -f "$SIGNING_PROFILE" ]] || fail "$SIGNING_PROFILE missing"
+  PROFILE_UUID="$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< "$(security cms -D -i "$SIGNING_PROFILE")")"
+  # Xcode 16 and later look here; older ones in ~/Library/MobileDevice
+  for dir in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"; do
+    mkdir -p "$dir" && cp "$SIGNING_PROFILE" "$dir/$PROFILE_UUID.provisionprofile"
+  done
+fi
+
 step "Archiving (Release)"
 rm -rf "build/$APP.xcarchive" build/export build/dmg-staging
 ARCHIVE_ARGS=(-project "$PROJ" -scheme "$SCHEME" -configuration Release -archivePath "build/$APP.xcarchive" archive -quiet)
@@ -72,6 +83,12 @@ HELPER_INFO="$(codesign -dvvv "$HELPER" 2>&1)"
 [[ "$HELPER_INFO" == *"Identifier=com.rossnicholson.KeyBar.helper"* ]] || fail "the helper has the wrong signing identifier"
 [[ "$HELPER_INFO" == *"flags=0x10000(runtime)"* ]] || fail "the helper isn't built with the hardened runtime"
 codesign --verify --deep --strict "$APPBUNDLE" || fail "the app's signature doesn't verify"
+if [[ -n "$SIGNING_PROFILE" ]]; then
+  # Without the profile inside, macOS refuses to open an app with the keychain group
+  [[ -f "$APPBUNDLE/Contents/embedded.provisionprofile" ]] || fail "the provisioning profile isn't in the app"
+  ENTITLEMENTS="$(codesign -d --entitlements - --xml "$APPBUNDLE" 2>/dev/null)"
+  [[ "$ENTITLEMENTS" == *"5HQ5V9NP82.com.rossnicholson.KeyBar"* ]] || fail "the app lacks the keychain group for iCloud Keychain"
+fi
 
 # Version comes from the built app — works whether or not the project is XcodeGen.
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APPBUNDLE/Contents/Info.plist")"

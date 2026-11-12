@@ -29,6 +29,17 @@ struct SettingsView: View {
                 }
             })
 
+            SectionLabel(text: "Your other Macs")
+            SettingToggle(title: "Sync with iCloud Keychain",
+                          detail: state.canSync
+                            ? "Keys, with their groups, notes and folders, go to iCloud Keychain, so KeyBar on each Mac signed in to your Apple Account has them. Apple encrypts them end to end. Needs Passwords & Keychain on in System Settings → Apple Account → iCloud."
+                            : "This copy of KeyBar can't use iCloud Keychain. The version from Homebrew or GitHub can.",
+                          isOn: Binding(get: { settings.syncWithICloud }, set: { on in Task { await state.setSync(on) } })) {
+                if state.isMovingKeys { SettingNote("Moving keys…") }
+                if let note = state.syncNote { SettingNote(note) }
+            }
+            .disabled(!state.canSync || state.isMovingKeys)
+
             SectionLabel(text: "App")
             SettingToggle(title: "Show in the Dock", detail: "Off, KeyBar lives in the menu bar and only shows in the Dock while this window is open.",
                           isOn: $settings.showInDock)
@@ -43,7 +54,9 @@ struct SettingsView: View {
 
             SectionLabel(text: "Where things are")
             VStack(alignment: .leading, spacing: 6) {
-                place("Key values", "Your login keychain, as items named “KeyBar: NAME”")
+                place("Key values", state.store.syncs
+                      ? "iCloud Keychain, as items named “KeyBar: NAME” (open the Passwords app to see them)"
+                      : "Your login keychain, as items named “KeyBar: NAME”")
                 place("Names, groups, notes, folders", "~/.keybar/index.json")
                 place("Activity log", "~/.keybar/activity.json")
                 place("Claude Code connection", "~/.claude.json (and the note in ~/.claude/CLAUDE.md)")
@@ -99,7 +112,7 @@ private struct DangerZone: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             SettingLabel(title: "Delete everything",
-                         detail: "Removes all \(state.store.records.count) keys from your Keychain, clears the activity log and disconnects Claude Code. This can't be undone.")
+                         detail: "Removes all \(state.store.records.count) keys from your Keychain\(state.store.syncs ? " and from iCloud Keychain, so from all your Macs" : ""), clears the activity log and disconnects Claude Code. This can't be undone.")
             HStack {
                 ConfirmButton(title: "Delete everything", confirmTitle: "Really delete all keys?") {
                     Task {

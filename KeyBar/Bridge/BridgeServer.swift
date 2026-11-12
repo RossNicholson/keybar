@@ -107,6 +107,8 @@ final class BridgePolicy {
     }
 
     func handle(_ request: BridgeRequest) -> BridgeReply {
+        // A key added on another Mac a moment ago should work straight away
+        if store.syncs && request.action != .finished { store.refresh() }
         switch request.action {
         case .list: return list(request)
         case .resolve: return resolve(request)

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- iCloud Keychain sync. Allowed only by signing/KeyBar.provisionprofile,
+         so only release builds have it: macOS won't open an app that claims
+         it without the profile. -->
+    <key>com.apple.application-identifier</key>
+    <string>5HQ5V9NP82.com.rossnicholson.KeyBar</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>5HQ5V9NP82</string>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>5HQ5V9NP82.com.rossnicholson.KeyBar</string>
+    </array>
+</dict>
+</plist>

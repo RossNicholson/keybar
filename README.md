@@ -96,9 +96,21 @@ keybar run --env-file .env.production -- npm start
 
 KeyBar asks with Touch ID first and shows the command. One yes covers that exact command in that folder for 15 minutes; `keybar run` always asks, whatever Settings says about Claude, because its output isn't redacted. Other lines in the `.env` are set too, unless they're set already, the way dotenv does it, so tools that read `.env` themselves (Next.js, Vite, dotenv) keep working: the real values are already in the environment. Folder limits apply, and inside Claude Code `keybar run` refuses and points Claude to `run_with_secrets`.
 
+## Sync with your other Macs
+
+Turn on **Settings → Sync with iCloud Keychain** and KeyBar moves your keys into iCloud Keychain, so KeyBar on every Mac signed in to your Apple Account has the same keys, with their groups, notes, folder limits and archived state. Apple encrypts iCloud Keychain end to end. It needs *Passwords & Keychain* turned on in System Settings → Apple Account → iCloud.
+
+- A key added, changed or deleted on one Mac shows up on the others within a minute, or straight away when Claude asks for it.
+- If two Macs had different keys under the same name, the one already in iCloud keeps the name and the other gets `_2` on the end. KeyBar tells you which.
+- Turning sync off keeps a copy of every key on this Mac. The iCloud copies stay for your other Macs.
+- With sync on, *Delete everything* deletes the keys from all your Macs.
+- Activity and when a key was last used stay on each Mac.
+
+Sync needs KeyBar's provisioning profile, which only the builds from Homebrew and GitHub releases have. A copy built from source keeps keys on its own Mac.
+
 ## Features
 
-- **Keychain storage.** Each key is its own item in your login keychain, named "KeyBar: NAME". Values are never written anywhere else.
+- **Keychain storage.** Each key is its own item in your login keychain (or iCloud Keychain, with sync on), named "KeyBar: NAME". Values are never written anywhere else.
 - **Menu bar panel.** Find a key, show it or copy it. Showing and copying ask for Touch ID (or your Mac's password) first.
 - **Clipboard care.** A copied key is wiped after 20 seconds (or 1 or 2 minutes), and is marked so clipboard managers skip it.
 - **Activity log.** Every use, with the key, the program it ran, the folder, the exit code and whether anything was hidden, labelled *By Claude Code* or *By you*. Never values.
@@ -133,13 +145,14 @@ KeyBar asks with Touch ID first and shows the command. One yes covers that exact
 
 ## Privacy
 
-KeyBar makes no network requests of its own except checking for updates (Homebrew's index, or GitHub's latest release for a DMG install). No analytics, no crash reporter, no account. Service recognition is built in.
+KeyBar makes no network requests of its own except checking for updates (Homebrew's index, or GitHub's latest release for a DMG install). No analytics, no crash reporter, no account. Service recognition is built in. With sync on, macOS's iCloud Keychain carries the keys between your Macs; KeyBar never sees that traffic.
 
 Local files, all readable only by you:
 
 | What | Where |
 |---|---|
-| Key values | Your login keychain |
+| Key values | Your login keychain, or iCloud Keychain with sync on |
+| Synced details (group, note, folders) | With each key in iCloud Keychain, with sync on |
 | Names, groups, notes, folders | `~/.keybar/index.json` |
 | Activity log (no values) | `~/.keybar/activity.json` |
 | The socket the helper uses | `~/.keybar/keybar.sock` |

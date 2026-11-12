@@ -36,6 +36,50 @@ struct SecretRecord: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// The details that travel with a synced key, in its Keychain item: when
+/// it was last used stays on each Mac
+struct SyncedDetails: Codable, Equatable {
+    var group: String?
+    var note: String?
+    var projectFolders: [String]
+    var createdAt: Date
+    var updatedAt: Date
+    var archivedAt: Date?
+    var position: Int?
+
+    init(_ record: SecretRecord) {
+        group = record.group
+        note = record.note
+        projectFolders = record.projectFolders
+        createdAt = record.createdAt
+        updatedAt = record.updatedAt
+        archivedAt = record.archivedAt
+        position = record.position
+    }
+
+    func apply(to record: inout SecretRecord) {
+        record.group = group
+        record.note = note
+        record.projectFolders = projectFolders
+        record.createdAt = createdAt
+        record.updatedAt = updatedAt
+        record.archivedAt = archivedAt
+        record.position = position
+    }
+
+    var encoded: Data? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try? encoder.encode(self)
+    }
+
+    static func decode(_ data: Data) -> SyncedDetails? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(SyncedDetails.self, from: data)
+    }
+}
+
 enum StoreError: LocalizedError {
     case invalidName(String)
     case duplicate(String)
@@ -73,8 +117,12 @@ final class SecretStore {
     }
 
     static func live() -> SecretStore {
-        SecretStore(vault: KeychainVault(), indexURL: Storage.directory.appendingPathComponent("index.json"))
+        SecretStore(vault: LiveVault.live(), indexURL: Storage.directory.appendingPathComponent("index.json"))
     }
+
+    /// The Keychain vault that can sync, in the app (not in tests or demo mode)
+    var live: LiveVault? { vault as? LiveVault }
+    var syncs: Bool { live?.syncs ?? false }
 
     // MARK: - Reading
 
@@ -162,8 +210,8 @@ final class SecretStore {
             if !projectFolders.isEmpty { existing.projectFolders = projectFolders }
             replace(existing)
         } else {
-            records.append(SecretRecord(name: name, group: group?.nonEmpty, note: note?.nonEmpty,
-                                        projectFolders: projectFolders, createdAt: now, updatedAt: now))
+            replace(SecretRecord(name: name, group: group?.nonEmpty, note: note?.nonEmpty,
+                                 projectFolders: projectFolders, createdAt: now, updatedAt: now))
         }
         save()
     }
@@ -197,7 +245,7 @@ final class SecretStore {
         records.removeAll { $0.name == name }
         record.name = newName
         record.updatedAt = Date()
-        records.append(record)
+        replace(record)
         save()
     }
 
@@ -279,10 +327,78 @@ final class SecretStore {
 
     private func replace(_ record: SecretRecord) {
         if let index = records.firstIndex(where: { $0.name == record.name }) {
+            let before = records[index]
             records[index] = record
+            if SyncedDetails(before) != SyncedDetails(record) { push(record) }
         } else {
             records.append(record)
+            push(record)
         }
+    }
+
+    /// Saves a key's details with it in the Keychain (only synced keys keep them)
+    private func push(_ record: SecretRecord) {
+        if let data = SyncedDetails(record).encoded { try? vault.setDetails(record.name, data) }
+    }
+
+    // MARK: - iCloud Keychain
+
+    /// Picks up keys added, changed or deleted on another Mac
+    func refresh() {
+        let merged = merge(records)
+        if merged != records {
+            records = merged
+            save()
+        }
+    }
+
+    /// Moves this Mac's keys into iCloud Keychain and starts syncing. A key
+    /// iCloud already has under the same name with another value (from
+    /// another Mac) keeps that name; this Mac's copy gets a new one.
+    /// Returns those renames, old name to new.
+    @discardableResult
+    func moveToICloud(_ live: LiveVault) throws -> [String: String] {
+        var renamed: [String: String] = [:]
+        let theirs = Set(try live.iCloud.names())
+        var taken = theirs.union(try live.thisMac.names()).union(records.map(\.name))
+        for name in try live.thisMac.names().sorted() {
+            guard let value = try live.thisMac.read(name) else { continue }
+            var target = name
+            if theirs.contains(name), let existing = try live.iCloud.read(name), existing != value {
+                target = Self.freeName(name, taken: taken)
+                taken.insert(target)
+                renamed[name] = target
+            }
+            try live.iCloud.write(target, value: value)
+            try live.thisMac.delete(name)
+            if target != name, var record = record(name) {
+                records.removeAll { $0.name == name }
+                record.name = target
+                records.append(record)
+            }
+        }
+        live.syncs = true
+        records = merge(records)
+        save()
+        return renamed
+    }
+
+    /// Stops syncing, keeping a copy of every synced key on this Mac. The
+    /// iCloud copies stay for the other Macs.
+    func keepOnThisMac(_ live: LiveVault) throws {
+        let mine = Set(try live.thisMac.names())
+        for name in try live.iCloud.names() where !mine.contains(name) {
+            if let value = try live.iCloud.read(name) { try live.thisMac.write(name, value: value) }
+        }
+        live.syncs = false
+        refresh()
+    }
+
+    /// NAME_2, NAME_3… the first not in `taken`
+    static func freeName(_ name: String, taken: Set<String>) -> String {
+        var number = 2
+        while taken.contains("\(name)_\(number)") { number += 1 }
+        return "\(name)_\(number)"
     }
 
     // MARK: - The index
@@ -309,22 +425,37 @@ final class SecretStore {
                 lastError = "KeyBar couldn't read its list of keys (\(indexURL.path)). The keys themselves are safe in the Keychain."
             }
         }
-        // The Keychain is the truth: keep what's there, add anything the index lacks
+        records = merge(loaded)
+        if indexURL != nil { save() }
+    }
+
+    /// `base` brought in line with the Keychain, which is the truth: keeps
+    /// what's there, adds anything missing, and takes synced keys' details
+    /// from their items
+    private func merge(_ base: [SecretRecord]) -> [SecretRecord] {
+        var merged = base
         do {
             let stored = Set(try vault.names())
-            loaded.removeAll { !stored.contains($0.name) }
+            merged.removeAll { !stored.contains($0.name) }
             // Forgotten items deleted since don't need remembering
             forgotten.formIntersection(stored)
-            let known = Set(loaded.map(\.name))
+            let known = Set(merged.map(\.name))
             let now = Date()
             for name in stored.subtracting(known).subtracting(forgotten) where SecretName.isValid(name) {
-                loaded.append(SecretRecord(name: name, createdAt: now, updatedAt: now))
+                merged.append(SecretRecord(name: name, createdAt: now, updatedAt: now))
+            }
+            let synced = try vault.details()
+            for index in merged.indices {
+                if let data = synced[merged[index].name], let details = SyncedDetails.decode(data) {
+                    details.apply(to: &merged[index])
+                } else {
+                    push(merged[index])
+                }
             }
         } catch {
             lastError = error.localizedDescription
         }
-        records = loaded
-        if indexURL != nil { save() }
+        return merged
     }
 
     private func save() {

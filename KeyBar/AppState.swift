@@ -57,10 +57,31 @@ final class AppState {
     /// Reopens the menu bar panel, which closes while Touch ID asks
     @ObservationIgnored var reopenPanel: (() -> Void)?
 
+    /// Whether this copy of KeyBar can use iCloud Keychain: release builds
+    /// can, test builds (without KeyBar's provisioning profile) can't
+    let canSync: Bool
+    /// What turning sync on or off did, or why it didn't
+    private(set) var syncNote: String?
+    private(set) var isMovingKeys = false
+    @ObservationIgnored private var refreshTimer: Timer?
+
     init(store: SecretStore, log: ActivityLog, claude: ClaudeConnector) {
         self.store = store
         self.log = log
         self.claude = claude
+        canSync = store.live?.iCloudAvailable ?? false
+        // A build that can't reach iCloud Keychain uses this Mac's keys
+        if store.syncs && !canSync {
+            store.live?.syncs = false
+            settings.syncWithICloud = false
+            store.refresh()
+        }
+        // Other Macs' changes arrive in iCloud Keychain without telling us
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                if self?.store.syncs == true { self?.store.refresh() }
+            }
+        }
     }
 
     static func live() -> AppState {
@@ -258,6 +279,36 @@ final class AppState {
         return result
     }
 
+    /// Turns iCloud Keychain sync on (moving this Mac's keys there) or off
+    /// (keeping a copy of each on this Mac)
+    func setSync(_ on: Bool) async {
+        guard on != store.syncs, let live = store.live, canSync, !isMovingKeys else { return }
+        let reason = on ? "move your keys to iCloud Keychain" : "stop syncing your keys with iCloud Keychain"
+        guard await OwnerCheck.confirm(reason, required: settings.requireTouchID && !isDemo) else { return }
+        isMovingKeys = true
+        defer { isMovingKeys = false }
+        syncNote = nil
+        do {
+            if on {
+                let renamed = try store.moveToICloud(live)
+                let count = store.records.count
+                syncNote = "\(count) \(count == 1 ? "key is" : "keys are") in iCloud Keychain."
+                if !renamed.isEmpty {
+                    let list = renamed.sorted { $0.key < $1.key }.map { "\($0.key) is now \($0.value)" }.joined(separator: ", ")
+                    syncNote! += " Another Mac already had keys with these names, so this Mac's are renamed: \(list)."
+                }
+                log.log(.changed, store.records.map(\.name), detail: "Moved to iCloud Keychain")
+            } else {
+                try store.keepOnThisMac(live)
+                syncNote = "Keys stay on this Mac only. Your other Macs keep the iCloud copies."
+                log.log(.changed, store.records.map(\.name), detail: "Kept on this Mac only")
+            }
+        } catch {
+            syncNote = "Couldn't finish: \(error.localizedDescription) Nothing was lost; keys are read from both places."
+        }
+        settings.syncWithICloud = store.syncs
+    }
+
     func deleteEverything() throws {
         try store.deleteEverything()
         revealed = [:]
@@ -313,6 +364,14 @@ final class AppSettings {
 
     static func label(forSeconds seconds: TimeInterval) -> String {
         seconds < 60 ? "\(Int(seconds)) sec" : "\(Int(seconds / 60)) min"
+    }
+
+    nonisolated static let syncKey = "syncWithICloud"
+
+    /// Whether keys live in iCloud Keychain. Changed with AppState.setSync,
+    /// which moves the keys.
+    var syncWithICloud: Bool = UserDefaults.standard.bool(forKey: AppSettings.syncKey) {
+        didSet { UserDefaults.standard.set(syncWithICloud, forKey: AppSettings.syncKey) }
     }
 
     var showInDock: Bool = UserDefaults.standard.bool(forKey: "showInDock") {

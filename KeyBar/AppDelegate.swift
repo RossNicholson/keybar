@@ -13,6 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var policy: BridgePolicy?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // `--check-icloud-keychain`: saves, reads and deletes a test item in
+        // iCloud Keychain, then quits. For checking a release build signs
+        // with the profile that allows it.
+        if CommandLine.arguments.contains("--check-icloud-keychain") {
+            exit(Self.checkICloudKeychain() ? 0 : 1)
+        }
         // Don't touch the Keychain or open anything when hosting unit tests
         let testing = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         #if DEBUG
@@ -62,6 +68,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// The key, with a coral dot when Claude Code isn't connected (unless
     /// that's turned off in Settings)
+    private static func checkICloudKeychain() -> Bool {
+        let vault = KeychainVault(service: "KeyBar check \(UUID().uuidString)", place: .iCloud)
+        do {
+            try vault.write("CHECK", value: "ok")
+            try vault.setDetails("CHECK", Data("details".utf8))
+            let read = try vault.read("CHECK")
+            let details = try vault.details()["CHECK"]
+            try vault.delete("CHECK")
+            let left = try vault.names()
+            let good = read == "ok" && details == Data("details".utf8) && left.isEmpty
+            print(good ? "iCloud Keychain: ok" : "iCloud Keychain: read back the wrong thing")
+            return good
+        } catch {
+            print("iCloud Keychain: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     private func updateStatusIcon() {
         guard let button = statusItem?.button else { return }
         let symbol = NSImage(systemSymbolName: "key.horizontal.fill", accessibilityDescription: "KeyBar")
