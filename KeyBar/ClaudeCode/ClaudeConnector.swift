@@ -263,7 +263,7 @@ final class ClaudeConnector {
         }
         let tools = (replies.first { ($0["id"] as? Int) == 2 }?["result"] as? [String: Any])?["tools"] as? [[String: Any]]
         let call = replies.first { ($0["id"] as? Int) == 3 }?["result"] as? [String: Any]
-        guard let tools, tools.count == 2 else {
+        guard let tools, tools.contains(where: { $0["name"] as? String == "run_with_secrets" }) else {
             testResult = .failed("The helper didn't answer. \(result.output.nonEmpty ?? "No output.")")
             return
         }
