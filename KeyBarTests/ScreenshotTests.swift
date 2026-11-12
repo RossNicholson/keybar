@@ -62,6 +62,9 @@ final class ScreenshotTests: XCTestCase {
         try Snapshot.panel(to: out.appendingPathComponent("window-add.png")) {
             AddKeyView {}.environment(state)
         }
+        // The mascot on its own, for the website
+        try Snapshot.png(Mascot(size: 560, disc: nil).frame(width: 560, height: 560), size: NSSize(width: 560, height: 560),
+                         to: out.appendingPathComponent("mascot.png"), transparent: true, exactPixels: true)
     }
 
     /// The app icon: the mascot on a periwinkle squircle, at every size
