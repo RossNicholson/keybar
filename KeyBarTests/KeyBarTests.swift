@@ -159,6 +159,31 @@ final class StoreTests: XCTestCase {
         return (SecretStore(vault: vault, indexURL: nil), vault)
     }
 
+    func testGroupsIgnoreCapitals() throws {
+        let (store, _) = makeStore()
+        try store.add(name: "CF_TOKEN", value: "v1", group: "MadRobot")
+        try store.add(name: "NEWSLETTER_KEY", value: "v2", group: "madrobot ")
+        XCTAssertEqual(store.record("NEWSLETTER_KEY")?.group, "MadRobot", "joins the group as it's spelled")
+        store.setGroup("CF_TOKEN", "MADROBOT")
+        XCTAssertEqual(store.record("CF_TOKEN")?.group, "MadRobot")
+        XCTAssertEqual(store.groups.filter { $0.lowercased() == "madrobot" }.count, 1)
+    }
+
+    func testOldSpellingsJoinOnLoad() throws {
+        let vault = MemoryVault(["A_KEY": "a", "B_KEY": "b"])
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("keybar-index-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let old = Date(timeIntervalSince1970: 1_000)
+        let index = """
+        {"version":1,"secrets":[
+          {"name":"A_KEY","group":"MadRobot","projectFolders":[],"createdAt":"\(ISO8601DateFormatter().string(from: old))","updatedAt":"\(ISO8601DateFormatter().string(from: old))"},
+          {"name":"B_KEY","group":"Madrobot","projectFolders":[],"createdAt":"2026-11-12T14:00:00Z","updatedAt":"2026-11-12T14:00:00Z"}]}
+        """
+        try Data(index.utf8).write(to: url)
+        let store = SecretStore(vault: vault, indexURL: url)
+        XCTAssertEqual(store.record("B_KEY")?.group, "MadRobot", "the oldest key's spelling wins")
+    }
+
     func testArchiveHidesButKeeps() throws {
         let (store, vault) = makeStore()
         try store.add(name: "OLD_TOKEN", value: "v1")

@@ -57,10 +57,11 @@ struct AddKeyView: View {
             }
 
             if !compact {
-                HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 5) {
                         FieldLabel(text: "Group", detail: "optional")
                         HouseField(placeholder: "e.g. a project", text: $group, mono: false)
+                        GroupSuggestions(text: $group)
                     }
                     VStack(alignment: .leading, spacing: 5) {
                         FieldLabel(text: "Note", detail: "optional")

@@ -160,7 +160,30 @@ final class SecretStore {
 
     /// Custom group names people have typed, for suggestions
     var customGroups: [String] {
-        Array(Set(records.compactMap { $0.group?.nonEmpty })).sorted()
+        Array(Set(records.compactMap { $0.group?.nonEmpty })).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// The group as it's already spelled, so "madrobot" joins "MadRobot"
+    /// instead of starting a second group
+    func existingGroup(_ group: String?) -> String? {
+        guard let typed = group?.nonEmpty else { return nil }
+        return customGroups.first { $0.caseInsensitiveCompare(typed) == .orderedSame } ?? typed
+    }
+
+    /// Puts keys whose groups differ only in capitals into one group, spelled
+    /// as the oldest key has it
+    private func joinGroupSpellings() {
+        let grouped = Dictionary(grouping: records.filter { $0.group?.nonEmpty != nil }) { $0.group!.lowercased() }
+        var changed = false
+        for (_, members) in grouped where Set(members.map(\.group)).count > 1 {
+            let spelling = members.min { $0.createdAt < $1.createdAt }!.group
+            for var record in members where record.group != spelling {
+                record.group = spelling
+                replace(record)
+                changed = true
+            }
+        }
+        if changed { save() }
     }
 
     /// Hand-ordered keys first, in their order, then the rest by name
@@ -198,6 +221,7 @@ final class SecretStore {
              projectFolders: [String] = [], replacing: Bool = false) throws {
         guard SecretName.isValid(name) else { throw StoreError.invalidName(name) }
         guard !value.isEmpty else { throw StoreError.emptyValue }
+        let group = group.map { existingGroup($0) ?? "" }
         let existing = record(name)
         if existing != nil && !replacing { throw StoreError.duplicate(name) }
         try vault.write(name, value: value)
@@ -219,7 +243,7 @@ final class SecretStore {
     /// Saves changed details (group, note, folders); not the value or name
     func update(_ record: SecretRecord) {
         var record = record
-        record.group = record.group?.nonEmpty
+        record.group = existingGroup(record.group)
         record.note = record.note?.nonEmpty
         replace(record)
         save()
@@ -289,7 +313,7 @@ final class SecretStore {
     /// Puts a key in a group (nil: back under its service)
     func setGroup(_ name: String, _ group: String?) {
         guard var record = record(name) else { return }
-        record.group = group?.nonEmpty
+        record.group = existingGroup(group)
         record.position = nil
         replace(record)
         save()
@@ -303,6 +327,7 @@ final class SecretStore {
             replace(record)
         }
         save()
+        joinGroupSpellings()
     }
 
     /// Removes every key from the Keychain and the index
@@ -350,6 +375,7 @@ final class SecretStore {
             records = merged
             save()
         }
+        joinGroupSpellings()
     }
 
     /// Moves this Mac's keys into iCloud Keychain and starts syncing. A key
@@ -427,6 +453,7 @@ final class SecretStore {
         }
         records = merge(loaded)
         if indexURL != nil { save() }
+        joinGroupSpellings()
     }
 
     /// `base` brought in line with the Keychain, which is the truth: keeps

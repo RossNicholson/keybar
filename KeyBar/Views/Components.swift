@@ -247,3 +247,41 @@ struct ConfirmButton: View {
         .buttonStyle(PressableStyle())
     }
 }
+
+/// The groups already in use, under a Group field: tap one to fill it in.
+/// Shows the ones matching what's typed, or all of them while it's empty.
+struct GroupSuggestions: View {
+    @Environment(AppState.self) private var state
+    @Binding var text: String
+
+    private var matches: [String] {
+        let typed = text.trimmingCharacters(in: .whitespaces)
+        return state.store.customGroups.filter {
+            typed.isEmpty || ($0.localizedCaseInsensitiveContains(typed) && $0.caseInsensitiveCompare(typed) != .orderedSame)
+        }
+        .prefix(6).map { $0 }
+    }
+
+    var body: some View {
+        if !matches.isEmpty {
+            HStack(spacing: 5) {
+                ForEach(matches, id: \.self) { group in
+                    Button { text = group } label: {
+                        Text(group)
+                            .font(.mono(9.5, weight: .semibold))
+                            .foregroundStyle(AppColors.text)
+                            .lineLimit(1)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(AppColors.surface, in: Capsule(style: .circular))
+                            .overlay(Capsule(style: .circular).strokeBorder(AppColors.hairline))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Put it in \(group)")
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}

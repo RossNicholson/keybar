@@ -17,8 +17,11 @@ struct KeysView: View {
             ScreenHeader(title: "Keys", subtitle: subtitle) {
                 HStack(spacing: 8) {
                     GhostButton(title: "Find keys", symbol: "magnifyingglass") { finding = true }
+                        .fixedSize()
                     GhostButton(title: "Import .env", symbol: "square.and.arrow.down") { chooseEnvFile() }
+                        .fixedSize()
                     PillButton(title: "Add key", symbol: "plus") { showingAdd = true }
+                        .fixedSize()
                 }
             }
             if let importError { SettingNote(importError) }
@@ -218,12 +221,13 @@ struct KeyEditor: View {
                               subtitle: [record.service?.name, record.kind].compactMap { $0 }.joined(separator: " · "))
             }
 
-            HStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 field("Name", detail: "the environment variable") {
                     HouseField(placeholder: record.name, text: $name)
                 }
                 field("Group", detail: "optional") {
                     HouseField(placeholder: record.service?.name ?? "Other", text: $group, mono: false)
+                    GroupSuggestions(text: $group)
                 }
             }
             field("Note", detail: "optional") {
@@ -409,6 +413,7 @@ struct ImportView: View {
             VStack(alignment: .leading, spacing: 5) {
                 FieldLabel(text: "Group", detail: "optional, e.g. the project's name")
                 HouseField(placeholder: "No group", text: $group, mono: false)
+                GroupSuggestions(text: $group)
             }
             if let error { SettingNote(error) }
             HStack {
