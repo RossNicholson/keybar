@@ -66,6 +66,12 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
   ask for Touch ID like the real app; only tests skip it.
 - Still to check after the first release: Connect against Ross's real Claude Code from the installed
   app (it was only checked in a temp HOME, to keep build paths out of his config).
-- Before the first release: Ross adds the six CI secrets to the repo, copies docs/keybar.rb into the tap,
-  runs `make release VERSION=1.0.0`; then add KeyBar to HouseStyle's More apps and the website (no site
-  page until it's released).
+- Release prep done 2026-11-12, waiting on Ross:
+  - Tap: local branch `add-keybar` in /Volumes/t7ssd/Dev/homebrew-tap (cask + README row), not pushed.
+    Merge and push it to main right before releasing (CI only bumps an existing cask).
+  - Website: local branch `keybar` in /Volumes/t7ssd/Dev/RossNicholsonWebsite (keybar.html, keybar.css,
+    images/keybar, home card, privacy, terms, support, sitemap). Merge to main after the release is out.
+  - The repo has no CI secrets yet. Auto mode blocked disabling the workflow and a local notarised
+    build, so the release needs Ross: add the six secrets, then `make release VERSION=1.0.0`.
+  - After release: add KeyBar to HouseStyle "More apps", connect Ross's real Claude Code from the
+    installed app and check it.
