@@ -50,6 +50,18 @@ struct Leak: Identifiable, Hashable, Sendable {
             case .gitHistory: return "Git history"
             }
         }
+
+        /// Who the app sends chats to
+        var aiService: String {
+            switch self {
+            case .claudeCode, .claudeDesktop: return "Anthropic"
+            case .codex: return "OpenAI"
+            case .gemini: return "Google"
+            case .cursor: return "Cursor and the AI service it used"
+            case .windsurf: return "Windsurf and the AI service it used"
+            case .shellHistory, .gitHistory: return "no one"
+            }
+        }
     }
 
     var name: String
@@ -61,6 +73,28 @@ struct Leak: Identifiable, Hashable, Sendable {
     var count: Int
 
     var id: String { "\(name)|\(path)|\(detail ?? "")" }
+
+    /// A settings file rather than chats or history
+    var isSettings: Bool {
+        let file = (path as NSString).lastPathComponent.lowercased()
+        return [".claude.json", "claude_desktop_config.json", "settings.json", "settings.local.json", "config.toml",
+                "mcp.json", "mcp_config.json", "config.json"].contains(file)
+    }
+
+    /// Who could see this copy, in plain words
+    var exposure: String {
+        switch place {
+        case .gitHistory:
+            return "It's in this repo's history, so anyone with a copy of the repo has it. If it was pushed (to GitHub, say), so does anyone who can see it there, even though the file has changed since."
+        case .shellHistory:
+            return "It's in your shell's history. That isn't sent anywhere, but any app you run can read it, and it's in your backups."
+        default:
+            if isSettings {
+                return "It's written out in \(place.title)'s settings. That stays on this Mac, but any app you run can read it, and it's in your backups."
+            }
+            return "It's in \(place.title)'s chats or prompt history, so it was most likely sent to \(place.aiService) as part of a conversation. On this Mac, any app you run can read it, and it's in your backups."
+        }
+    }
 
     /// Whether KeyBar can hide it by rewriting the file: text logs only, not
     /// databases or git history

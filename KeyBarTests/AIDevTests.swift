@@ -214,6 +214,15 @@ final class LeakScannerTests: XCTestCase {
         XCTAssertFalse(leaks.first?.canHide ?? true)
     }
 
+    func testSaysWhoCouldSeeIt() {
+        XCTAssertTrue(Leak(name: "K", place: .claudeCode, path: "/u/.claude/history.jsonl", count: 1).exposure.contains("sent to Anthropic"))
+        XCTAssertTrue(Leak(name: "K", place: .codex, path: "/u/.codex/sessions/a.jsonl", count: 1).exposure.contains("sent to OpenAI"))
+        let settings = Leak(name: "K", place: .claudeCode, path: "/u/.claude.json", count: 1)
+        XCTAssertTrue(settings.isSettings)
+        XCTAssertFalse(settings.exposure.contains("sent to"))
+        XCTAssertTrue(Leak(name: "K", place: .gitHistory, path: "/u/Dev/shop", count: 1).exposure.contains("pushed"))
+    }
+
     func testIdentifiersArentWatched() {
         let now = Date()
         XCTAssertTrue(Needles.of(SecretRecord(name: "CLOUDFLARE_ACCOUNT_ID", createdAt: now, updatedAt: now), value: "3f0c9d2a7b1e4c8f9a6d5e2b1c0f7a8e").isEmpty)

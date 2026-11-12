@@ -140,7 +140,7 @@ The command never has the key, so nothing it prints, logs or sends anywhere can 
 - zsh, bash and fish history, and Python, Node and database console history
 - With **Include git history** on, every commit in the repositories under your *Find keys* folders
 
-Each find shows the file (or the commit and file), how many copies, and **Show** in Finder. **Hide** replaces the copies in that file with `[REDACTED]`; a key in git history can't be hidden. Either way the safe fix is a new key, so each leaked key has **Rotate**. Account IDs, publishable keys and other identifiers aren't secret and are skipped, and so are values under 12 characters. It all runs on your Mac.
+A find means there's a copy of the key in a plain-text file outside the Keychain, not that anyone has used it. Each one says who could have seen that copy: a chat or prompt history was most likely sent to that AI service with the conversation; a settings file or shell history stays on your Mac (but any app you run, and your backups, have it); git history is with anyone who has the repo. Each find shows the file (or the commit and file), how many copies, and **Show** in Finder. **Hide** replaces the copies in that file with `[REDACTED]`; a key in git history can't be hidden. Either way the safe fix is a new key, so each leaked key has **Rotate**. Account IDs, publishable keys and other identifiers aren't secret and are skipped, and so are values under 12 characters. It all runs on your Mac.
 
 ## Commit guard
 
