@@ -605,11 +605,16 @@ enum CredentialKind {
     ]
 
     static func of(_ name: String) -> String {
+        matched(name) ?? "Secret"
+    }
+
+    /// The kind a name's ending says, or nil if it says none (NODE_ENV)
+    static func matched(_ name: String) -> String? {
         let upper = name.uppercased()
         for (suffix, kind) in suffixes where upper == suffix || upper.hasSuffix("_" + suffix) || upper.hasSuffix(suffix) && suffix.count > 4 {
             return kind
         }
-        return "Secret"
+        return nil
     }
 }
 

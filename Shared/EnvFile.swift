@@ -8,6 +8,19 @@ enum EnvFile {
     struct Entry: Hashable, Sendable {
         var name: String
         var value: String
+
+        /// The stored key a `NAME=keybar:STORED` line points to
+        var reference: String? { EnvFile.reference(in: value) }
+    }
+
+    /// What a value starts with when it points to a key in KeyBar instead of
+    /// holding it: `STRIPE_SECRET_KEY=keybar:MADROBOT_STRIPE_SECRET_KEY`
+    static let referencePrefix = "keybar:"
+
+    static func reference(in value: String) -> String? {
+        guard value.hasPrefix(referencePrefix) else { return nil }
+        let name = String(value.dropFirst(referencePrefix.count))
+        return SecretName.isValid(name) ? name : nil
     }
 
     static func parse(_ text: String) -> [Entry] {

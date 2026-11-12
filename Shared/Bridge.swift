@@ -15,6 +15,8 @@ enum Bridge {
     static var socketPath: String { directory.appendingPathComponent("keybar.sock").path }
 
     static let appBundleID = "com.rossnicholson.KeyBar"
+    /// Who `keybar run` says is asking, in the activity log and Touch ID prompt
+    static let terminalClient = "keybar run"
     static let helperIdentifier = "com.rossnicholson.KeyBar.helper"
 
     /// The longest we wait for the app to answer

@@ -91,6 +91,18 @@ final class SecretStore {
         records.compactMap { try? vault.read($0.name, interactive: false) }
     }
 
+    /// Which stored key holds each value, for spotting keys KeyBar already
+    /// has. Never shows a Keychain dialog, like `allValues`.
+    func namesByValue() -> [String: String] {
+        var names: [String: String] = [:]
+        for record in records {
+            if let value = try? vault.read(record.name, interactive: false), names[value] == nil {
+                names[value] = record.name
+            }
+        }
+        return names
+    }
+
     /// The groups in use, in display order
     var groups: [String] {
         var seen = Set<String>()

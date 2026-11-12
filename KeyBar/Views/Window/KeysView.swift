@@ -10,11 +10,13 @@ struct KeysView: View {
     @State private var importing: ImportRequest?
     @State private var importError: String?
     @State private var showArchived = false
+    @State private var finding = false
 
     var body: some View {
         Screen {
             ScreenHeader(title: "Keys", subtitle: subtitle) {
                 HStack(spacing: 8) {
+                    GhostButton(title: "Find keys", symbol: "magnifyingglass") { finding = true }
                     GhostButton(title: "Import .env", symbol: "square.and.arrow.down") { chooseEnvFile() }
                     PillButton(title: "Add key", symbol: "plus") { showingAdd = true }
                 }
@@ -24,10 +26,10 @@ struct KeysView: View {
 
             if state.store.active.isEmpty && state.store.archived.isEmpty {
                 MessageCard(title: "No keys yet",
-                            message: "Add your API keys once: Claude, Cloudflare, GitHub, anything. They go in your Mac's Keychain, and Claude Code can use them by name without ever seeing them. Got a .env file? Import it.",
+                            message: "Add your API keys once: Claude, Cloudflare, GitHub, anything. They go in your Mac's Keychain, and Claude Code can use them by name without ever seeing them. Already have keys in .env files? Find them.",
                             fill: AppColors.butter) {
-                    PillButton(title: "Add a key", symbol: "plus") { showingAdd = true }
-                    GhostButton(title: "Import .env", symbol: "square.and.arrow.down") { chooseEnvFile() }
+                    PillButton(title: "Find keys on this Mac", symbol: "magnifyingglass") { finding = true }
+                    GhostButton(title: "Add a key", symbol: "plus") { showingAdd = true }
                 }
             } else {
                 HStack(spacing: 12) {
@@ -71,6 +73,9 @@ struct KeysView: View {
         }
         .sheet(item: $editing) { record in
             KeyEditor(record: record) { editing = nil }.environment(state)
+        }
+        .sheet(isPresented: $finding) {
+            FindKeysView { finding = false }.environment(state)
         }
         .sheet(item: $importing) { request in
             ImportView(request: request) { importing = nil }.environment(state)

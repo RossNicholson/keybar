@@ -153,10 +153,11 @@ final class BridgePolicy {
     /// it needn't ask (it's not a use, it'll be refused anyway, approval is
     /// off, or the user approved the same use recently enough)
     func approvalPrompt(for request: BridgeRequest) -> String? {
-        guard request.action == .resolve, let settings, settings.approvalSeconds != 0,
-              problem(with: request) == nil else { return nil }
-        if settings.approvalSeconds > 0, let approved = approvals[Self.approvalScope(request)],
-           Date().timeIntervalSince(approved) < settings.approvalSeconds {
+        guard request.action == .resolve, let settings, problem(with: request) == nil else { return nil }
+        let seconds = Self.approvalSeconds(for: request, setting: settings.approvalSeconds)
+        guard seconds != 0 else { return nil }
+        if seconds > 0, let approved = approvals[Self.approvalScope(request)],
+           Date().timeIntervalSince(approved) < seconds {
             return nil
         }
         let names = (request.names ?? []).sorted().joined(separator: ", ")
@@ -166,14 +167,28 @@ final class BridgePolicy {
         if command.count > Self.promptCommandLength {
             command = String(command.prefix(Self.promptCommandLength)) + "…"
         }
-        return "let \(request.client) use \(names) in \(Self.tidy(request.projectFolder ?? request.cwd)) to run: \(command)"
+        let folder = Self.tidy(request.projectFolder ?? request.cwd)
+        if request.client == Bridge.terminalClient {
+            return "give \(names) to a command in \(folder) (keybar run): \(command)"
+        }
+        return "let \(request.client) use \(names) in \(folder) to run: \(command)"
+    }
+
+    /// How long one approval lasts. `keybar run` always asks (15 minutes at
+    /// most): its output isn't redacted, so "never" would let any program
+    /// running as you print every key with it.
+    static func approvalSeconds(for request: BridgeRequest, setting: TimeInterval) -> TimeInterval {
+        guard request.client == Bridge.terminalClient, setting == 0 else { return setting }
+        return 900
     }
 
     /// One approval covers the same client using the same keys from the same
-    /// project, not every key for everyone
+    /// project, not every key for everyone. For `keybar run` it covers only
+    /// the same command: approving `npm run dev` doesn't approve `printenv`.
     private static func approvalScope(_ request: BridgeRequest) -> String {
-        [request.client, request.projectFolder ?? request.cwd, (request.names ?? []).sorted().joined(separator: ",")]
-            .joined(separator: "\u{1F}")
+        var parts = [request.client, request.projectFolder ?? request.cwd, (request.names ?? []).sorted().joined(separator: ",")]
+        if request.client == Bridge.terminalClient { parts.append(request.command ?? "") }
+        return parts.joined(separator: "\u{1F}")
     }
 
     func approved(_ request: BridgeRequest) {
@@ -263,7 +278,7 @@ final class BridgePolicy {
     }
 
     /// ~/Dev/Project instead of /Users/name/Dev/Project
-    static func tidy(_ path: String) -> String {
+    nonisolated static func tidy(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }

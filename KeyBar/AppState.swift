@@ -165,6 +165,99 @@ final class AppState {
         return imported.count
     }
 
+    // MARK: - Find keys
+
+    /// What Find keys found, as candidates to import
+    func plan(_ found: [FoundKey]) -> [ScanCandidate] {
+        let byValue = store.namesByValue()
+        return ScanPlan.make(found, stored: Set(store.records.map(\.name)), storedName: { byValue[$0] })
+    }
+
+    /// Why these candidates can't be imported as they are, or nil if they can
+    func importProblem(_ candidates: [ScanCandidate]) -> String? {
+        var names = Set<String>()
+        for candidate in candidates where candidate.include && candidate.status != .stored {
+            guard SecretName.isValid(candidate.name) else { return StoreError.invalidName(candidate.name).errorDescription }
+            if store.record(candidate.name) != nil || !names.insert(candidate.name).inserted {
+                return "\(candidate.name) is used twice. Give one of them another name."
+            }
+        }
+        return nil
+    }
+
+    /// Imports the ticked candidates, and returns them marked as stored
+    func importFound(_ candidates: [ScanCandidate]) throws -> [ScanCandidate] {
+        if let problem = importProblem(candidates) { throw ImportProblem(message: problem) }
+        var result = candidates
+        var imported: [String] = []
+        for index in result.indices where result[index].include && result[index].status != .stored {
+            let candidate = result[index]
+            try store.add(name: candidate.name, value: candidate.value, group: candidate.group,
+                          note: "Found in \(candidate.whereFound)")
+            result[index].status = .stored
+            imported.append(candidate.name)
+        }
+        if !imported.isEmpty { log.log(.imported, imported, detail: "Found on this Mac") }
+        return result
+    }
+
+    struct ImportProblem: LocalizedError {
+        var message: String
+        var errorDescription: String? { message }
+    }
+
+    struct SwapResult: Equatable {
+        var files = 0
+        var swapped = 0
+        /// Files that couldn't be changed, with why
+        var failed: [String] = []
+        /// Variables left as they were, e.g. a value over several lines
+        var skipped: [String] = []
+    }
+
+    /// The .env files a swap could change: the ones holding stored values
+    func swappableFiles(_ candidates: [ScanCandidate]) -> [String] {
+        let paths = candidates.filter { $0.status == .stored }
+            .flatMap(\.sources).filter(\.canHoldReferences).map(\.path)
+        var seen = Set<String>()
+        return paths.filter { seen.insert($0).inserted }
+    }
+
+    /// Swaps the values in these .env files for keybar: references, once each
+    /// value is checked to be in the Keychain
+    func swapReferences(_ candidates: [ScanCandidate], in files: [String]) -> SwapResult {
+        var result = SwapResult()
+        for path in files {
+            var references: [String: (value: String, stored: String)] = [:]
+            for candidate in candidates where candidate.status == .stored && candidate.sources.contains(where: { $0.path == path }) {
+                // Never take a value out of a file unless KeyBar really has it
+                guard (try? store.value(candidate.name)) == candidate.value else { continue }
+                references[candidate.variable] = (candidate.value, candidate.name)
+            }
+            let label = candidates.flatMap(\.sources).first { $0.path == path }?.label ?? BridgePolicy.tidy(path)
+            guard !references.isEmpty else { continue }
+            do {
+                let url = URL(fileURLWithPath: path)
+                let text = try String(contentsOf: url, encoding: .utf8)
+                let rewrite = EnvRewriter.rewrite(text, references: references)
+                result.skipped += rewrite.skipped.map { "\($0) in \(label)" }
+                guard !rewrite.swapped.isEmpty else { continue }
+                let permissions = (try? FileManager.default.attributesOfItem(atPath: path))?[.posixPermissions]
+                try Data(rewrite.text.utf8).write(to: url, options: .atomic)
+                if let permissions {
+                    try? FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: path)
+                }
+                result.files += 1
+                result.swapped += rewrite.swapped.count
+                log.log(.changed, rewrite.swapped.compactMap { references[$0]?.stored },
+                        detail: "\(label) now points to KeyBar")
+            } catch {
+                result.failed.append("\(label): \(error.localizedDescription)")
+            }
+        }
+        return result
+    }
+
     func deleteEverything() throws {
         try store.deleteEverything()
         revealed = [:]
@@ -227,6 +320,25 @@ final class AppSettings {
             UserDefaults.standard.set(showInDock, forKey: "showInDock")
             onChange?()
         }
+    }
+
+    /// The folders Find keys looks through for .env files
+    var scanFolders: [String] = UserDefaults.standard.stringArray(forKey: "scanFolders") ?? AppSettings.defaultScanFolders {
+        didSet { UserDefaults.standard.set(scanFolders, forKey: "scanFolders") }
+    }
+
+    /// The usual places for code that this Mac has. Not Documents, Desktop or
+    /// Downloads: macOS would ask about each of them.
+    static var defaultScanFolders: [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return ["Developer", "Dev", "dev", "Projects", "projects", "Code", "code", "src", "repos", "GitHub", "Sites", "workspace"]
+            .map { home.appendingPathComponent($0) }
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+            .map { $0.resolvingSymlinksInPath().path }
+            // Dev and dev are one folder on a Mac's usual disk
+            .reduce(into: [String]()) { found, path in
+                if !found.contains(where: { $0.lowercased() == path.lowercased() }) { found.append(path) }
+            }
     }
 
     /// Whether Connect also adds the note to CLAUDE.md
