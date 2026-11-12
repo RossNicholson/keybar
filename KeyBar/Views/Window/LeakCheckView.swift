@@ -38,7 +38,7 @@ struct LeakCheckView: View {
                 } else {
                     let names = Set(visible.map(\.name))
                     summary(title: names.count == 1 ? "1 key found outside KeyBar" : "\(names.count) keys found outside KeyBar",
-                            message: "There's a copy of \(names.count == 1 ? "this key" : "each key") below in a plain-text file, outside the Keychain. That doesn't mean anyone has used it: under each copy is who could have seen it. Hide removes the copy. A new key (Rotate) makes every copy useless, which matters most for keys that can spend money, send email or change things.",
+                            message: "A copy of \(names.count == 1 ? "this key" : "each key") below is in a file outside the Keychain. That doesn't mean anyone has used it: each copy says who could have seen it. Hide deletes a copy. To make every copy useless, replace the key and delete the old one on the service's site. Rotate walks you through it.",
                             fill: AppColors.coral, happy: false)
                     ForEach(names.sorted(), id: \.self) { name in
                         keyLeaks(name, visible.filter { $0.name == name })
