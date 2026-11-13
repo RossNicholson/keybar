@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.updateHotKey()
         }
         guard !testing else { return }
+        // Helpers before 1.4.8 started KeyBar hidden (`open -j`), and the
+        // menu bar panel can't show while the app is hidden
+        if NSApp.isHidden { NSApp.unhideWithoutActivation() }
 
         setUpStatusItem()
         let quickCopy = QuickCopyController(state: state)

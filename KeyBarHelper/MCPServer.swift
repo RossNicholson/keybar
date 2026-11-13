@@ -470,7 +470,8 @@ enum AppLink {
         }
     }
 
-    /// Opens the KeyBar this helper is inside, in the background
+    /// Opens the KeyBar this helper is inside, in the background. Not
+    /// hidden (`open -j`): a hidden app's menu bar panel never shows.
     private static func launchApp() {
         let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         // …/KeyBar.app/Contents/Helpers/keybar
@@ -478,8 +479,8 @@ enum AppLink {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = bundle.pathExtension == "app"
-            ? ["-g", "-j", bundle.path, "--args", "-launchedByHelper", "YES"]
-            : ["-g", "-j", "-b", Bridge.appBundleID, "--args", "-launchedByHelper", "YES"]
+            ? ["-g", bundle.path, "--args", "-launchedByHelper", "YES"]
+            : ["-g", "-b", Bridge.appBundleID, "--args", "-launchedByHelper", "YES"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try? process.run()
