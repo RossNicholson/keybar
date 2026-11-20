@@ -58,6 +58,15 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
   setup, not his real one) call fill_password, check the Touch ID prompt, the Activity entry and a
   refusal. Not done: Firefox (out of scope), sites whose password field is in a cross-origin frame on
   another domain (refused by design), a real-device check of Arc/Brave/Edge.
+  **Same day, the app itself tested end to end** (signed Debug build, `-demo YES`, its own folder via
+  `KEYBAR_DEV_DIR=~/.keybar-dev`, which Debug builds read so a dev copy never takes over the installed app's
+  socket; the path must stay short for the socket): fill_password through the dev helper → Touch ID → fill,
+  logged in on the herokuapp demo twice; Touch ID prompt wording checked; Cancel refuses and fills nothing,
+  logged as "Refused to fill"; run_with_secrets, send_secret, API key, unknown name and wrong site hint all
+  refused; a Safari and a Chrome page both with focused fields → "2 password fields" refusal (by design).
+  A fill takes about 2 s while Chrome is open (Chromium tree warm-up); the first after launch took 13 s once.
+  Also fixed: PolicyAIDevTests set approvalSeconds without restoring it, so every `make test` since 12 Nov
+  set the installed KeyBar's Touch ID setting to never ask. Ross's setting was 0 on 20 Nov: ask him.
 - **2026-11-12: `keybar run` asks for Touch ID every time** (Ross's call): no approval is ever reused, whatever
   Settings or a key's own rule says. Closes the gap where a kept approval could be reused by something that
   edited the command's script or got past the Claude Code check. On main, waiting for release as 1.4.6.

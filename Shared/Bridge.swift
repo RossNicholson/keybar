@@ -9,7 +9,15 @@ enum Bridge {
     /// ~/.keybar: the socket, the index of key names and the activity log.
     /// Key values are never written here; they live in the Keychain.
     static var directory: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".keybar", isDirectory: true)
+        #if DEBUG
+        // Debug builds only: a separate folder (socket, index, log) for
+        // end-to-end tests, so a dev copy never takes over the installed
+        // app's socket. Release builds ignore it.
+        if let folder = ProcessInfo.processInfo.environment["KEYBAR_DEV_DIR"], folder.hasPrefix("/") {
+            return URL(fileURLWithPath: folder, isDirectory: true)
+        }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".keybar", isDirectory: true)
     }
 
     static var socketPath: String { directory.appendingPathComponent("keybar.sock").path }
