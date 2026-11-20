@@ -3,7 +3,11 @@ import XCTest
 
 final class LoginSiteTests: XCTestCase {
     func testNormalisesPastedAddressesAndDomains() throws {
-        XCTAssertEqual(try LoginSite.normalise("https://www.LiverpoolFC.com/login?next=/shop#x"), "www.liverpoolfc.com")
+        XCTAssertEqual(try LoginSite.normalise("https://www.LiverpoolFC.com/login?next=/shop#x"), "liverpoolfc.com")
+        XCTAssertEqual(try LoginSite.normalise("www.bbc.co.uk"), "bbc.co.uk")
+        // www. in front of a shared ending stays, rather than saving the ending
+        XCTAssertEqual(try LoginSite.normalise("www.co.uk"), "www.co.uk")
+        XCTAssertTrue(LoginSite.matches("accounts.liverpoolfc.com", websites: [try LoginSite.normalise("https://www.liverpoolfc.com/login")]))
         XCTAssertEqual(try LoginSite.normalise("  liverpoolfc.com/ "), "liverpoolfc.com")
         XCTAssertEqual(try LoginSite.normalise("LIVERPOOLFC.COM."), "liverpoolfc.com", "a trailing dot is the same host")
         XCTAssertEqual(try LoginSite.normalise("https://accounts.liverpoolfc.com:443/"), "accounts.liverpoolfc.com")

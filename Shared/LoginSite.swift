@@ -35,7 +35,9 @@ enum LoginSite {
     ]
 
     /// A pasted address or a typed domain as the lowercase host it's saved
-    /// as: "https://www.LiverpoolFC.com/login?x=1" → "www.liverpoolfc.com"
+    /// as: "https://www.LiverpoolFC.com/login?x=1" → "liverpoolfc.com". A
+    /// leading www. is the site itself, so it's dropped: the password then
+    /// also fills on accounts.liverpoolfc.com and the like.
     static func normalise(_ text: String) throws -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw Problem.empty }
@@ -50,6 +52,7 @@ enum LoginSite {
         let labels = host.split(separator: ".", omittingEmptySubsequences: false)
         guard labels.count >= 2, labels.allSatisfy({ !$0.isEmpty }) else { throw Problem.invalid(trimmed) }
         guard !sharedSuffixes.contains(host) else { throw Problem.tooBroad(host) }
+        if host.hasPrefix("www."), let site = try? normalise(String(host.dropFirst(4))) { return site }
         return host
     }
 
