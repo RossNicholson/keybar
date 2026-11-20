@@ -3,14 +3,29 @@ import SwiftUI
 // KeyBar's own pieces. The shared buttons, labels and cards come from the
 // HouseStyle package.
 
-/// A pastel square with the service's initials, so each service keeps its colour
+/// A pastel square with the service's initials, so each service keeps its
+/// colour. A password gets a person-and-key symbol, in its site's colour.
 struct ServiceTile: View {
     let record: SecretRecord
     var size: CGFloat = 32
 
     var body: some View {
+        if record.isPassword {
+            Image(systemName: "person.badge.key.fill")
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(AppColors.ink)
+                .frame(width: size, height: size)
+                .background(AppColors.pastel(for: record.sites.first ?? record.name),
+                            in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            initialsTile
+        }
+    }
+
+    private var initialsTile: some View {
         let label = record.service?.name ?? record.name
-        Text(Self.initials(label))
+        return Text(Self.initials(label))
             .font(.display(size * 0.5, relativeTo: .headline))
             .foregroundStyle(AppColors.ink)
             .frame(width: size, height: size)
@@ -168,6 +183,19 @@ struct KeySubtitle: View {
                 .padding(.horizontal, 5)
                 .padding(.vertical, 1)
                 .background(AppColors.butter.opacity(0.55), in: RoundedRectangle(cornerRadius: 4))
+        } else if record.isPassword {
+            HStack(spacing: 4) {
+                Text(record.loginSummary)
+                if record.isRestricted {
+                    Image(systemName: "folder.fill").font(.system(size: 8))
+                        .help("Only for some project folders")
+                }
+            }
+            .font(.mono(9.5))
+            .foregroundStyle(AppColors.secondaryText)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(record.sites.joined(separator: "\n"))
         } else {
             HStack(spacing: 4) {
                 Text(record.service.map { "\($0.name) · \(record.kind)" } ?? record.kind)
@@ -406,5 +434,140 @@ struct AttentionBanner<Actions: View>: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(fill, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
+    }
+}
+
+/// A password's websites: each one a chip with a remove button, and a field
+/// that takes a pasted address or a typed domain (several at once, split by
+/// commas or spaces). Return or Add puts what's typed on the list.
+struct WebsitesField: View {
+    @Binding var websites: [String]
+    /// What's typed and not yet added; saving adds it too
+    @Binding var typed: String
+    @Binding var error: String?
+    var onSubmit: () -> Void = {}
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !websites.isEmpty {
+                FlowChips(items: websites) { site in websites.removeAll { $0 == site } }
+            }
+            HStack(spacing: 8) {
+                HouseField(placeholder: websites.isEmpty ? "liverpoolfc.com, or paste the login page's address" : "Another website",
+                           text: $typed, onSubmit: { if !add() { onSubmit() } })
+                if !typed.trimmingCharacters(in: .whitespaces).isEmpty {
+                    GhostButton(title: "Add", symbol: "plus") { _ = add() }
+                        .fixedSize()
+                }
+            }
+        }
+    }
+
+    /// Adds what's typed. True if there was something to add (and it was a
+    /// website), false if the field was empty.
+    @discardableResult
+    func add() -> Bool {
+        guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        do {
+            for site in try LoginSite.normaliseList(typed) where !websites.contains(site) { websites.append(site) }
+            typed = ""
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+        return true
+    }
+}
+
+/// Small removable chips that wrap onto more lines
+private struct FlowChips: View {
+    let items: [String]
+    let remove: (String) -> Void
+
+    var body: some View {
+        WrapLayout(spacing: 5) {
+            ForEach(items, id: \.self) { item in
+                HStack(spacing: 5) {
+                    Image(systemName: "globe").font(.system(size: 9, weight: .semibold))
+                    Text(item).font(.mono(10.5, weight: .semibold)).lineLimit(1)
+                    Button { remove(item) } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove \(item)")
+                }
+                .foregroundStyle(AppColors.text)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(AppColors.surface, in: Capsule(style: .circular))
+                .overlay(Capsule(style: .circular).strokeBorder(AppColors.hairline))
+            }
+        }
+    }
+}
+
+/// Lays its subviews out left to right, wrapping onto new lines
+struct WrapLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = [Row()]
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let needed = rows[rows.count - 1].indices.isEmpty ? size.width : rows[rows.count - 1].width + spacing + size.width
+            if needed > width && !rows[rows.count - 1].indices.isEmpty {
+                rows.append(Row())
+            }
+            var row = rows[rows.count - 1]
+            row.width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+            rows[rows.count - 1] = row
+        }
+        return rows.filter { !$0.indices.isEmpty }
+    }
+}
+
+/// A password field with a button that makes up a strong one
+struct PasswordValueField: View {
+    @Binding var value: String
+    var placeholder = "The password"
+    var onSubmit: () -> Void = {}
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HouseField(placeholder: placeholder, text: $value, secure: true, onSubmit: onSubmit)
+            GhostButton(title: "Generate", symbol: "wand.and.stars") {
+                value = PasswordGenerator.make()
+            }
+            .fixedSize()
+            .help("Make up a strong \(PasswordGenerator.defaultLength)-character password. Show it with the eye, or copy it later from KeyBar.")
+        }
     }
 }

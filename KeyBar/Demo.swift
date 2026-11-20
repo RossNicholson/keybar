@@ -33,6 +33,11 @@ enum Demo {
         store.setArchived("HEROKU_API_KEY", true)
         try? store.add(name: "GOOGLE_SERVICE_ACCOUNT", value: demoServiceAccount, group: "Website",
                        note: "Search Console reports", fileName: "search-console.json")
+        // The public demo login page (the-internet.herokuapp.com/login), so
+        // fill_password can be tried for real in demo mode
+        try? store.add(name: "LOGIN_THE_INTERNET", value: "SuperSecretPassword!", note: "Public demo login page",
+                       login: ("tomsmith", ["the-internet.herokuapp.com"]))
+        try? store.add(name: "LOGIN_LIVERPOOLFC", value: "demo-Kop-2005-Istanbul!", login: ("you@example.com", ["liverpoolfc.com"]))
         store.setExpiry("GITHUB_TOKEN", Calendar.current.date(byAdding: .day, value: 9, to: Date()))
         let week = Date().addingTimeInterval(-6 * 86_400)
         for repo in ["RossNicholson/website", "RossNicholson/shop"] {
@@ -46,6 +51,9 @@ enum Demo {
             ActivityEntry(date: now.addingTimeInterval(-420), action: .ran, source: .claudeCode,
                           names: ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"], program: "wrangler",
                           folder: "\(NSHomeDirectory())/Dev/website", detail: "Exit 0"),
+            ActivityEntry(date: now.addingTimeInterval(-900), action: .filled, source: .claudeCode,
+                          names: ["LOGIN_LIVERPOOLFC"], program: ActivityEntry.fillProgram,
+                          folder: "\(NSHomeDirectory())/Dev/website", detail: "accounts.liverpoolfc.com in Safari"),
             ActivityEntry(date: now.addingTimeInterval(-1_500), action: .ran, source: .claudeCode,
                           names: ["GITHUB_TOKEN"], program: "curl",
                           folder: "\(NSHomeDirectory())/Dev/website", detail: "Exit 0 · 1 copy hidden"),

@@ -198,12 +198,39 @@ final class ClaudeConnector {
     static let reminderEnd = "<!-- KeyBar:end -->"
     static let reminder = """
     \(reminderStart)
-    ## API keys (KeyBar)
+    ## API keys and passwords (KeyBar)
     My API keys and tokens are stored in KeyBar. Before asking me to paste a key, or reading one from a .env file, \
     call the `list_secrets` tool of the `keybar` MCP server. Run commands that need a key with `run_with_secrets`, \
     referring to the key as `$NAME`. Never print, echo or save a key's value.
+    My website passwords are in KeyBar too. To log in to a site, open its login page, type the username yourself, \
+    focus the password field and call `fill_password`, then submit the form. Never ask me to type a password into \
+    the chat; if one isn't stored, call `request_secret` with type `password` and the website.
     \(reminderEnd)
     """
+
+    /// The note as it's written now, if CLAUDE.md has one from an older KeyBar
+    var reminderIsOutdated: Bool {
+        guard let text = try? String(contentsOf: memoryURL, encoding: .utf8),
+              let start = text.range(of: Self.reminderStart),
+              let end = text.range(of: Self.reminderEnd, range: start.upperBound..<text.endIndex) else { return false }
+        return String(text[start.lowerBound..<end.upperBound]) != Self.reminder
+    }
+
+    /// Brings an older note up to date, for a copy of KeyBar that's the one
+    /// connected (never a test build pointing elsewhere). Replaced where it
+    /// is, so the rest of the file stays as it was.
+    func updateReminderIfOutdated() {
+        guard status == .connected, hasReminder, reminderIsOutdated,
+              var text = try? String(contentsOf: memoryURL, encoding: .utf8),
+              let start = text.range(of: Self.reminderStart),
+              let end = text.range(of: Self.reminderEnd, range: start.upperBound..<text.endIndex) else { return }
+        text.replaceSubrange(start.lowerBound..<end.upperBound, with: Self.reminder)
+        do {
+            try Self.replaceFile(memoryURL, with: Data(text.utf8))
+        } catch {
+            lastError = "Couldn't update \(memoryURL.path): \(error.localizedDescription)"
+        }
+    }
 
     func setReminder(_ on: Bool) {
         let fm = FileManager.default

@@ -33,6 +33,9 @@ struct SettingsView: View {
                           detail: "A notification two weeks before a key's expiry date, and on the day. Set the date when you add or edit a key; Test fills it in for GitHub and Cloudflare tokens.",
                           isOn: $settings.expiryReminders)
 
+            SectionLabel(text: "Passwords")
+            AccessibilityCard()
+
             SectionLabel(text: "Your other Macs")
             SettingToggle(title: "Sync with iCloud Keychain",
                           detail: state.canSync
@@ -67,10 +70,10 @@ struct SettingsView: View {
 
             SectionLabel(text: "Where things are")
             VStack(alignment: .leading, spacing: 6) {
-                place("Key values", state.store.syncs
+                place("Key and password values", state.store.syncs
                       ? "iCloud Keychain, as items named “KeyBar: NAME” (open the Passwords app to see them)"
                       : "Your login keychain, as items named “KeyBar: NAME”")
-                place("Names, groups, notes, folders", "~/.keybar/index.json")
+                place("Names, groups, notes, folders, websites", "~/.keybar/index.json")
                 place("Activity log", "~/.keybar/activity.json")
                 place("Claude Code connection", "~/.claude.json (and the note in ~/.claude/CLAUDE.md)")
                 HStack {
@@ -113,6 +116,40 @@ struct SettingsView: View {
                 .font(.mono(10.5))
                 .foregroundStyle(AppColors.secondaryText)
                 .textSelection(.enabled)
+        }
+    }
+}
+
+/// Whether KeyBar may fill passwords: macOS's Accessibility permission, with
+/// a button to ask for it. Checked every couple of seconds while it shows, so
+/// it updates as soon as the switch is turned on in System Settings.
+private struct AccessibilityCard: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        let trusted = state.accessibilityTrusted
+        SettingCard(title: "Fill passwords in the browser",
+                    detail: "Claude asks with fill_password, and KeyBar types the password into the login page itself, so Claude never sees it. Only https pages on the password's websites, in Safari and Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi), not Firefox. macOS needs you to allow KeyBar under Accessibility for this.",
+                    trailing: {
+            if trusted {
+                TagPill(text: "Allowed", fill: AppColors.mint)
+            } else {
+                GhostButton(title: "Allow…", symbol: "hand.raised") {
+                    // macOS's own prompt, the first time; System Settings after
+                    if !AccessibilityAccess.ask() { AccessibilityAccess.openSettings() }
+                }
+                .fixedSize()
+            }
+        }, below: {
+            if !trusted {
+                SettingNote("Not allowed yet. Turn on KeyBar in System Settings → Privacy & Security → Accessibility. Until then fill_password tells Claude it can't fill.", isError: false)
+            }
+        })
+        .task {
+            while !Task.isCancelled {
+                state.refreshAccessibility()
+                try? await Task.sleep(for: .seconds(2))
+            }
         }
     }
 }

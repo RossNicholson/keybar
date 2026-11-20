@@ -54,6 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updateHotKey()
         // Rewrites the commit guard's hooks if KeyBar has moved
         state.refreshGuard()
+        // An older KeyBar's CLAUDE.md note doesn't mention passwords
+        state.claude.updateReminderIfOutdated()
         UNUserNotificationCenter.current().delegate = self
         // Demo keys answer the helper too, so the whole flow can be tried
         // without real keys
