@@ -156,14 +156,39 @@ final class AppState {
 
     // MARK: - Changing keys
 
+    /// `login` set: a website password
     func add(name: String, value: String, group: String?, note: String?, projectFolders: [String] = [],
-             fileName: String? = nil, expiresAt: Date? = nil) throws {
+             fileName: String? = nil, expiresAt: Date? = nil,
+             login: (username: String?, websites: [String])? = nil) throws {
         try store.add(name: name, value: value, group: group, note: note, projectFolders: projectFolders,
-                      fileName: fileName, expiresAt: expiresAt)
-        log.log(.added, [name], detail: fileName.map { "File \($0)" })
+                      fileName: fileName, expiresAt: expiresAt, login: login)
+        log.log(.added, [name], detail: login.map { "Password for \($0.websites.joined(separator: ", "))" } ?? fileName.map { "File \($0)" })
         if expiresAt != nil { ExpiryReminders.askPermission() }
         // A key Claude asked for is answered
-        if let request = keyRequest, request.name == name { answer(request) }
+        if let request = keyRequest, request.name == name, request.isPassword == (login != nil) {
+            request.added = name
+            answer(request)
+        }
+    }
+
+    /// Changes a password's websites and user name
+    func setLogin(_ name: String, username: String?, websites: [String]) {
+        guard var record = store.record(name), record.isPassword, !websites.isEmpty,
+              record.username != username?.nonEmpty || record.sites != websites else { return }
+        record.username = username
+        record.websites = websites
+        store.update(record)
+        log.log(.changed, [name], detail: "Password for \(websites.joined(separator: ", "))")
+    }
+
+    // MARK: - Accessibility (for filling passwords)
+
+    /// Whether macOS lets KeyBar fill passwords. Refreshed while Settings shows.
+    private(set) var accessibilityTrusted = AccessibilityAccess.isTrusted
+
+    func refreshAccessibility() {
+        let trusted = AccessibilityAccess.isTrusted
+        if trusted != accessibilityTrusted { accessibilityTrusted = trusted }
     }
 
     func delete(_ name: String) throws {
@@ -222,6 +247,10 @@ final class AppState {
     /// The sending itself, once the user has said yes
     func sendConfirmed(_ name: String, to destination: Destination, source: ActivityEntry.Source,
                        client: String? = nil) async -> Result<String, Error> {
+        // Passwords never leave the Mac
+        guard store.record(name)?.isPassword != true else {
+            return .failure(Sender.Failure.failed("\(name) is a website password. KeyBar never sends passwords anywhere."))
+        }
         let value: String
         do {
             value = try store.value(name)
@@ -374,11 +403,12 @@ final class AppState {
     /// A key Claude Code asked the user to add, while the Add window is up
     private(set) var keyRequest: KeyRequest?
 
-    /// Shows the Add window for a key Claude asked for. nil if one is
-    /// already showing.
-    func ask(name: String, reason: String, client: String) -> KeyRequest? {
+    /// Shows the Add window for a key Claude asked for (or, with `login`, a
+    /// password for a website). nil if one is already showing.
+    func ask(name: String, reason: String, client: String,
+             login: (website: String, username: String?)? = nil) -> KeyRequest? {
         guard keyRequest == nil else { return nil }
-        let request = KeyRequest(name: name, reason: reason, client: client)
+        let request = KeyRequest(name: name, reason: reason, client: client, website: login?.website, username: login?.username)
         keyRequest = request
         log.add(ActivityEntry(action: .requested, source: client == "Claude Code" ? .claudeCode : .other, names: [name],
                               detail: reason.isEmpty ? nil : reason, client: client == "Claude Code" ? nil : client))
@@ -685,14 +715,25 @@ final class AppSettings {
 /// user adds it (or doesn't)
 final class KeyRequest: Identifiable, @unchecked Sendable {
     let id = UUID()
+    /// The name suggested; a password's can be changed in the Add window
     let name: String
     let reason: String
     let client: String
+    /// Set for a password: the website it's for, and the user name if Claude knows it
+    let website: String?
+    let username: String?
     let answered = DispatchSemaphore(value: 0)
+    /// The name it was added under, set on the main thread before `answered`
+    /// is signalled
+    var added: String?
 
-    init(name: String, reason: String, client: String) {
+    var isPassword: Bool { website != nil }
+
+    init(name: String, reason: String, client: String, website: String? = nil, username: String? = nil) {
         self.name = name
         self.reason = reason
         self.client = client
+        self.website = website
+        self.username = username
     }
 }

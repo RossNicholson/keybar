@@ -1,9 +1,11 @@
 import Foundation
 
-/// A small MCP server over stdio: newline-delimited JSON-RPC 2.0. It offers
-/// two tools, one that lists the stored keys' names and one that runs a
-/// command with some of them set as environment variables. Tool calls run in
-/// the background so a long command doesn't hold up pings or cancelling it.
+/// A small MCP server over stdio: newline-delimited JSON-RPC 2.0. Its tools
+/// (see MCPCatalog) list the stored keys' names, run a command with some of
+/// them set as environment variables, fill a website password into a login
+/// page, ask the user for a key and send one to GitHub or Cloudflare. Tool
+/// calls run in the background so a long command doesn't hold up pings or
+/// cancelling it.
 final class MCPServer: @unchecked Sendable {
     let version: String
     private let out = FileHandle.standardOutput
@@ -17,24 +19,6 @@ final class MCPServer: @unchecked Sendable {
     init(version: String) {
         self.version = version
     }
-
-    static let instructions = """
-    KeyBar keeps the user's API keys and tokens (Claude, Cloudflare, GitHub and others) in the macOS Keychain. \
-    Before asking the user to paste a key, or reading one from a .env file, call list_secrets to see what's stored. \
-    To run a command that needs a key, call run_with_secrets with the key names: each one is set as an environment \
-    variable of that name, so refer to it as "$NAME" in the command. Never put a key's value in a command, and never \
-    try to print, echo or save a key. Output comes back with any copy of a key replaced by [REDACTED]. \
-    Don't run `keybar run` yourself: it's for the user's own terminal and doesn't hide keys. A .env line like \
-    NAME=keybar:STORED_NAME means the key is in KeyBar as STORED_NAME. A key that's a file (marked "file" in \
-    list_secrets) is set as the path to a private copy of it, for tools that want a key file. If a key you need \
-    isn't stored, call request_secret: KeyBar asks the user to add it, and you never see it. To put a key into a \
-    GitHub repo's Actions secrets or a Cloudflare Worker's or Pages project's secrets, call send_secret rather \
-    than piping it into gh or wrangler yourself. A key marked "through KeyBar's proxy" is set to a placeholder: \
-    SDKs read the base URL variable named there (e.g. ANTHROPIC_BASE_URL) and work as normal; for curl, call \
-    "$ANTHROPIC_BASE_URL/v1/messages" instead of the service's own address. A project's .keybar file lists the \
-    keys it uses; others are hidden there. If a commit is stopped by KeyBar's commit guard, a stored key's value \
-    is in the changes: replace it with a reference to the environment variable, never commit it.
-    """
 
     func run() {
         while let line = readLine(strippingNewline: true) {
@@ -77,12 +61,12 @@ final class MCPServer: @unchecked Sendable {
                 "protocolVersion": requested ?? "2025-06-18",
                 "capabilities": ["tools": ["listChanged": false]],
                 "serverInfo": ["name": "keybar", "title": "KeyBar", "version": version],
-                "instructions": Self.instructions,
+                "instructions": MCPCatalog.instructions,
             ])
         case "ping":
             reply(id, [:])
         case "tools/list":
-            reply(id, ["tools": Self.tools])
+            reply(id, ["tools": MCPCatalog.tools])
         case "tools/call":
             let name = params["name"] as? String ?? ""
             let call = Unchecked((id: id, arguments: params["arguments"] as? [String: Any] ?? [:]))
@@ -120,101 +104,14 @@ final class MCPServer: @unchecked Sendable {
 
     // MARK: - Tools
 
-    nonisolated(unsafe) static let tools: [[String: Any]] = [
-        [
-            "name": "list_secrets",
-            "title": "List stored keys",
-            "description": """
-            Lists the API keys and tokens stored in KeyBar: each one's name (also the environment variable it's \
-            set as), the service it's for and what kind of credential it is. Values are never shown. Call this \
-            before asking the user for a key.
-            """,
-            "inputSchema": ["type": "object", "properties": [String: Any](), "additionalProperties": false],
-            "annotations": ["readOnlyHint": true, "openWorldHint": false],
-        ],
-        [
-            "name": "run_with_secrets",
-            "title": "Run a command with stored keys",
-            "description": """
-            Runs a shell command with the named KeyBar keys set as environment variables, e.g. secretNames \
-            ["CLOUDFLARE_API_TOKEN"] and command "curl -H \\"Authorization: Bearer $CLOUDFLARE_API_TOKEN\\" \
-            https://api.cloudflare.com/client/v4/user/tokens/verify". Refer to keys only as "$NAME"; a command \
-            containing a key's actual value is refused. Returns the exit code, stdout and stderr, with any copy \
-            of a key replaced by [REDACTED]. Runs in the project folder unless cwd is given. Keys may be limited \
-            to certain project folders.
-            """,
-            "inputSchema": [
-                "type": "object",
-                "properties": [
-                    "command": ["type": "string", "description": "The shell command to run (zsh)."],
-                    "secretNames": [
-                        "type": "array", "items": ["type": "string"],
-                        "description": "Names of the keys to set as environment variables.",
-                    ],
-                    "cwd": ["type": "string", "description": "Folder to run in. Defaults to the project folder."],
-                    "timeoutSeconds": [
-                        "type": "number",
-                        "description": "Stop the command after this many seconds (default 120, at most 600).",
-                    ],
-                ],
-                "required": ["command", "secretNames"],
-                "additionalProperties": false,
-            ],
-            "annotations": ["destructiveHint": true, "openWorldHint": true],
-        ],
-        [
-            "name": "request_secret",
-            "title": "Ask the user to add a key",
-            "description": """
-            Asks the user to add a key KeyBar doesn't have yet: KeyBar opens its Add key window with the name \
-            filled in and your reason shown, and the user pastes the value there. Waits up to 5 minutes for them. \
-            You never see the value; once it's added, use it with run_with_secrets. Use this instead of asking the \
-            user to paste a key into the chat.
-            """,
-            "inputSchema": [
-                "type": "object",
-                "properties": [
-                    "name": ["type": "string", "description": "The name to store it as, also its environment variable, e.g. CLOUDFLARE_API_TOKEN."],
-                    "reason": ["type": "string", "description": "One short line for the user: what it's for and where to get it."],
-                ],
-                "required": ["name", "reason"],
-                "additionalProperties": false,
-            ],
-            "annotations": ["readOnlyHint": false, "destructiveHint": false, "openWorldHint": false],
-        ],
-        [
-            "name": "send_secret",
-            "title": "Send a key to GitHub or Cloudflare",
-            "description": """
-            Sends one stored key to a GitHub repository's Actions secrets (with gh), or a Cloudflare Worker's or \
-            Pages project's secrets (with wrangler), so a deploy can use it. KeyBar asks the user with Touch ID \
-            every time and sends it itself; the value never passes through you. Replaces a secret of the same name \
-            there.
-            """,
-            "inputSchema": [
-                "type": "object",
-                "properties": [
-                    "secretName": ["type": "string", "description": "The stored key to send (see list_secrets)."],
-                    "destination": [
-                        "type": "string", "enum": Destination.Kind.allCases.map(\.rawValue),
-                        "description": "githubActions, cloudflareWorker or cloudflarePages.",
-                    ],
-                    "target": ["type": "string", "description": "owner/repo for GitHub, else the Worker's or Pages project's name."],
-                    "nameThere": ["type": "string", "description": "The secret's name there. Defaults to secretName."],
-                ],
-                "required": ["secretName", "destination", "target"],
-                "additionalProperties": false,
-            ],
-            "annotations": ["destructiveHint": true, "openWorldHint": true],
-        ],
-    ]
-
     func callTool(_ name: String, _ arguments: [String: Any], requestID: String = UUID().uuidString) -> [String: Any] {
         switch name {
         case "list_secrets":
             return listSecrets()
         case "run_with_secrets":
             return runWithSecrets(arguments, requestID: requestID)
+        case "fill_password":
+            return fillPassword(arguments)
         case "request_secret":
             return requestSecret(arguments)
         case "send_secret":
@@ -243,48 +140,70 @@ final class MCPServer: @unchecked Sendable {
             return toolError("\(error)")
         }
         guard reply.ok, let secrets = reply.secrets else { return toolError(reply.error ?? "KeyBar refused.") }
-        guard !secrets.isEmpty else {
-            return toolText("KeyBar has no keys stored yet. Ask the user to add the key in KeyBar (menu bar → +) rather than pasting it here.")
-        }
-        var lines = ["Keys stored in KeyBar (use them with run_with_secrets, as \"$NAME\"):"]
-        for secret in secrets.sorted(by: { $0.name < $1.name }) {
-            var line = "- \(secret.name): \(secret.service.map { "\($0) " } ?? "")\(secret.kind.lowercased())"
-            if let group = secret.group { line += " [\(group)]" }
-            if let note = secret.note, !note.isEmpty { line += " (\(note))" }
-            if secret.restricted { line += secret.availableHere ? " (limited to some projects, including this one)" : " (not available in this folder)" }
-            if let fileName = secret.fileName { line += " (file \(fileName): $\(secret.name) is its path)" }
-            if let variable = secret.proxyVariable {
-                line += " (through KeyBar's proxy: $\(secret.name) is a placeholder; call $\(variable) instead of the service's address)"
-            }
-            if let expires = secret.expiresAt {
-                line += expires < Date() ? " (EXPIRED \(Self.day(expires)), may not work)" : " (expires \(Self.day(expires)))"
-            }
-            lines.append(line)
-        }
-        if let message = reply.message { lines.append("\n" + message) }
-        return toolText(lines.joined(separator: "\n"))
-    }
-
-    private static func day(_ date: Date) -> String {
-        date.formatted(.iso8601.year().month().day())
+        return toolText(SecretListing.text(secrets, message: reply.message))
     }
 
     private func requestSecret(_ arguments: [String: Any]) -> [String: Any] {
+        let typeName = (arguments["type"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard typeName.isEmpty || SecretType(rawValue: typeName) != nil else {
+            return toolError("type must be apiKey or password.")
+        }
+        let isPassword = typeName == SecretType.password.rawValue
         let name = (arguments["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
-        guard SecretName.isValid(name) else {
-            return toolError("\"\(name)\" can't be a key name: letters, numbers and underscores, starting with a letter.")
+        if !isPassword || !name.isEmpty {
+            guard SecretName.isValid(name) else {
+                return toolError("\"\(name)\" can't be a key name: letters, numbers and underscores, starting with a letter.")
+            }
+        }
+        var website: String?
+        if isPassword {
+            do {
+                website = try LoginSite.normalise(arguments["website"] as? String ?? "")
+            } catch {
+                return toolError("Give the website the password is for. \(error.localizedDescription)")
+            }
         }
         let reason = String((arguments["reason"] as? String ?? "").prefix(300))
+        let username = (arguments["username"] as? String).map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200)) }
         let reply: BridgeReply
         do {
             reply = try AppLink.send(BridgeRequest(action: .request, cwd: projectFolder, projectFolder: projectFolder,
-                                                   client: clientName, names: [name], reason: reason),
+                                                   client: clientName, names: name.isEmpty ? [] : [name], reason: reason,
+                                                   site: website, secretType: isPassword ? .password : nil,
+                                                   username: isPassword ? username : nil),
                                      timeout: Bridge.requestTimeout + 10)
         } catch {
             return toolError("\(error)")
         }
         guard reply.ok else { return toolError(reply.error ?? "KeyBar refused.") }
-        return toolText(reply.message ?? "\(name) is in KeyBar now. Use it with run_with_secrets.")
+        return toolText(reply.message ?? (isPassword ? "The password is in KeyBar now. Use it with fill_password."
+                                                     : "\(name) is in KeyBar now. Use it with run_with_secrets."))
+    }
+
+    /// Asks the app to fill a password into the login page open in a
+    /// browser. The app does it all; only what happened comes back.
+    private func fillPassword(_ arguments: [String: Any]) -> [String: Any] {
+        let name = (arguments["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard SecretName.isValid(name) else { return toolError("\"\(name)\" isn't a password's name. Use the names list_secrets gives.") }
+        var site: String?
+        if let hint = (arguments["site"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !hint.isEmpty {
+            do {
+                site = try LoginSite.normalise(hint)
+            } catch {
+                return toolError(error.localizedDescription)
+            }
+        }
+        let reply: BridgeReply
+        do {
+            // Long enough for the user to answer a Touch ID prompt
+            reply = try AppLink.send(BridgeRequest(action: .fill, cwd: projectFolder, projectFolder: projectFolder,
+                                                   client: clientName, names: [name], site: site),
+                                     timeout: Bridge.fillTimeout)
+        } catch {
+            return toolError("\(error)")
+        }
+        guard reply.ok else { return toolError(reply.error ?? "KeyBar refused.") }
+        return toolText(reply.message ?? "Filled the password. Submit the form now.")
     }
 
     private func sendSecret(_ arguments: [String: Any]) -> [String: Any] {

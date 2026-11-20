@@ -140,11 +140,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let policy = BridgePolicy(store: state.store, log: state.log, settings: state.settings, proxy: state.proxy)
         self.policy = policy
         let prompting = PromptGate()
+        let filling = PromptGate()
+        let filler = LoginFiller()
         let state = self.state!
         let server = BridgeServer { request in
             switch request.action {
             case .send: return Self.serveSend(request, policy: policy, state: state, prompting: prompting)
             case .request: return Self.serveRequest(request, policy: policy, state: state)
+            case .fill: return Self.serveFill(request, policy: policy, prompting: prompting, filling: filling, filler: filler)
             default: break
             }
             // The store lives on the main thread. Touch ID is asked for from
@@ -213,14 +216,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// Claude asked for a key that isn't stored: the Add window opens with
-    /// its name, and the reply waits until the user adds it or closes it
+    /// its name (or, for a password, its website), and the reply waits until
+    /// the user adds it or closes it
     nonisolated private static func serveRequest(_ request: BridgeRequest, policy: BridgePolicy, state: AppState) -> BridgeReply {
         if let answer = DispatchQueue.main.sync(execute: { MainActor.assumeIsolated { policy.requestAnswer(request) } }) {
             return answer
         }
-        let name = request.names?.first ?? ""
+        let wantsPassword = request.secretType == .password
+        // requestAnswer has checked a password request has a website
+        let website = request.site.flatMap { try? LoginSite.normalise($0) }
+        let name = request.names?.first ?? DispatchQueue.main.sync(execute: { MainActor.assumeIsolated {
+            state.store.suggestedPasswordName(for: website ?? "")
+        } })
         guard let asked = DispatchQueue.main.sync(execute: { MainActor.assumeIsolated {
-            state.ask(name: name, reason: request.reason ?? "", client: request.client)
+            state.ask(name: name, reason: request.reason ?? "", client: request.client,
+                      login: wantsPassword ? website.map { ($0, request.username?.nonEmpty) } : nil)
         } }) else {
             return .failure("KeyBar is already asking the user for a key. Try again once they've answered.")
         }
@@ -228,10 +238,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return DispatchQueue.main.sync {
             MainActor.assumeIsolated {
                 if waited == .timedOut { state.answer(asked) }
-                guard state.store.record(name) != nil else {
-                    return .failure("The user didn't add \(name)\(waited == .timedOut ? " (no answer in 5 minutes)" : ""). Don't ask for it again unless they say so.")
+                let added = asked.added ?? name
+                guard let record = state.store.record(added), record.isPassword == wantsPassword else {
+                    let what = wantsPassword ? "the password for \(website ?? "the site")" : name
+                    return .failure("The user didn't add \(what)\(waited == .timedOut ? " (no answer in 5 minutes)" : ""). Don't ask for it again unless they say so.")
+                }
+                if wantsPassword {
+                    return BridgeReply(ok: true, message: "\(added) is in KeyBar now, a password for \(record.sites.joined(separator: ", ")). "
+                        + "Use it with fill_password.")
                 }
                 return BridgeReply(ok: true, message: "\(name) is in KeyBar now. Use it with run_with_secrets.")
+            }
+        }
+    }
+
+    /// Claude asked to fill a password into a login page. The checks and the
+    /// log are on the main thread; finding the field, Touch ID and typing are
+    /// here, off it. The password is read only after any approval and goes
+    /// nowhere but the field.
+    nonisolated private static func serveFill(_ request: BridgeRequest, policy: BridgePolicy, prompting: PromptGate,
+                                              filling: PromptGate, filler: LoginFiller) -> BridgeReply {
+        // One fill at a time: two typing at once could mix their keys
+        guard filling.enter() else { return .failure("KeyBar is already filling a password. Try again in a moment.") }
+        defer { filling.leave() }
+        if let problem = DispatchQueue.main.sync(execute: { MainActor.assumeIsolated { policy.fillProblem(request) } }) {
+            return DispatchQueue.main.sync { MainActor.assumeIsolated { policy.refuseFill(request, problem) } }
+        }
+        let websites = DispatchQueue.main.sync { MainActor.assumeIsolated { policy.websites(for: request) } }
+        let target: FillTarget
+        switch filler.locate(websites: websites, site: request.site) {
+        case .success(let found):
+            target = found
+        case .failure(let problem):
+            return DispatchQueue.main.sync {
+                MainActor.assumeIsolated { policy.refuseFill(request, problem.message, site: problem.site, browser: problem.browser) }
+            }
+        }
+        defer { filler.finish(target) }
+
+        if let prompt = DispatchQueue.main.sync(execute: { MainActor.assumeIsolated {
+            policy.fillPrompt(request, site: target.host, browser: target.browser)
+        } }) {
+            guard prompting.enter() else {
+                return .failure("KeyBar is already waiting for the user to answer a Touch ID prompt. Try again once they have.")
+            }
+            let allowed = OwnerCheck.confirmBlocking(prompt, timeout: Bridge.approvalTimeout)
+            prompting.leave()
+            guard allowed else {
+                return DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { policy.declinedFill(request, site: target.host, browser: target.browser) }
+                }
+            }
+            DispatchQueue.main.sync { MainActor.assumeIsolated { policy.approvedFill(request, site: target.host) } }
+        }
+
+        let password: String
+        switch DispatchQueue.main.sync(execute: { MainActor.assumeIsolated { policy.passwordValue(request) } }) {
+        case .success(let value):
+            password = value
+        case .failure(let problem):
+            return DispatchQueue.main.sync { MainActor.assumeIsolated { policy.refuseFill(request, problem.message) } }
+        }
+        let result = filler.fill(target, password: password, websites: websites)
+        return DispatchQueue.main.sync {
+            MainActor.assumeIsolated {
+                switch result {
+                case .success: return policy.filled(request, site: target.host, browser: target.browser)
+                case .failure(let problem):
+                    return policy.refuseFill(request, problem.message, site: target.host, browser: target.browser)
+                }
             }
         }
     }

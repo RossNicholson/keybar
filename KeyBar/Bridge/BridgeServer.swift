@@ -100,14 +100,19 @@ final class BridgePolicy {
     /// `approvalScope`
     private var approvals: [String: Date] = [:]
 
+    /// Whether macOS lets KeyBar use Accessibility (filling passwords needs it)
+    private let accessibility: () -> Bool
+
     /// Values shorter than this aren't looked for in commands: too likely to match by chance
     static let literalCheckLength = 8
 
-    init(store: SecretStore, log: ActivityLog, settings: AppSettings? = nil, proxy: KeyProxy? = nil) {
+    init(store: SecretStore, log: ActivityLog, settings: AppSettings? = nil, proxy: KeyProxy? = nil,
+         accessibility: @escaping () -> Bool = { AccessibilityAccess.isTrusted }) {
         self.store = store
         self.log = log
         self.settings = settings
         self.proxy = proxy
+        self.accessibility = accessibility
     }
 
     func handle(_ request: BridgeRequest) -> BridgeReply {
@@ -119,7 +124,7 @@ final class BridgePolicy {
         case .finished: return finished(request)
         case .check: return check(request)
         // The app delegate runs these: they wait on the user, off the main thread
-        case .send, .request: return .failure("KeyBar couldn't handle that request.")
+        case .send, .request, .fill: return .failure("KeyBar couldn't handle that request.")
         }
     }
 
@@ -168,7 +173,9 @@ final class BridgePolicy {
             SecretSummary(name: record.name, service: record.service?.name, kind: record.kind,
                           group: record.group, note: record.note, restricted: record.isRestricted,
                           availableHere: isAvailable(record, for: request), fileName: record.fileName,
-                          expiresAt: record.expiresAt, proxyVariable: record.usesProxy ? KeyProxy.route(for: record)?.variable : nil)
+                          expiresAt: record.expiresAt, proxyVariable: record.usesProxy ? KeyProxy.route(for: record)?.variable : nil,
+                          isPassword: record.isPassword ? true : nil, username: record.isPassword ? record.username : nil,
+                          websites: record.isPassword ? record.sites : nil)
         }
         let hidden = store.active.count - shown.count
         let message = lists.isEmpty || hidden == 0 ? nil
@@ -247,10 +254,12 @@ final class BridgePolicy {
     /// One approval covers the same client using the same keys from the same
     /// project, not every key for everyone. (`keybar run` is never covered:
     /// it asks every time. Its scope still names the command and terminal, so
-    /// nothing changes if that's ever relaxed.)
-    static func approvalScope(_ request: BridgeRequest) -> String {
+    /// nothing changes if that's ever relaxed.) A fill's covers the same
+    /// password on the same site only.
+    static func approvalScope(_ request: BridgeRequest, site: String? = nil) -> String {
         var parts = [request.client, request.projectFolder ?? request.cwd, (request.names ?? []).sorted().joined(separator: ",")]
         if request.client == Bridge.terminalClient { parts += [request.command ?? "", request.terminal ?? ""] }
+        if request.action == .fill { parts += ["fill", site ?? ""] }
         return parts.joined(separator: "\u{1F}")
     }
 
@@ -279,9 +288,21 @@ final class BridgePolicy {
         guard !names.isEmpty else { return Problem(message: "Name at least one key.") }
         let missing = names.filter { store.record($0) == nil }
         if !missing.isEmpty {
-            let stored = store.active.map(\.name).joined(separator: ", ")
+            let stored = store.activeKeys.map(\.name).joined(separator: ", ")
             return Problem(message: "KeyBar has no key called \(missing.joined(separator: ", ")). "
                 + (stored.isEmpty ? "No keys are stored yet." : "Stored keys: \(stored)."))
+        }
+        // Passwords never go into a command (it could send one anywhere) or
+        // leave the Mac: they're only filled into their own login pages
+        let passwords = names.filter { store.record($0)?.isPassword == true }.sorted()
+        if !passwords.isEmpty {
+            let list = passwords.joined(separator: ", ")
+            let what = passwords.count == 1 ? "is a website password" : "are website passwords"
+            if request.action == .send { return Problem(message: "\(list) \(what), and KeyBar never sends passwords anywhere.") }
+            if request.client == Bridge.terminalClient { return Problem(message: "\(list) \(what), and KeyBar never gives passwords to commands.") }
+            return Problem(message: "\(list) \(what), and KeyBar never gives passwords to commands, so run_with_secrets can't use "
+                + "\(passwords.count == 1 ? "it" : "them"). To log in, open the login page, type the username, focus the password "
+                + "field and call fill_password.")
         }
         let archived = names.filter { store.record($0)?.isArchived == true }
         if !archived.isEmpty {
@@ -290,15 +311,7 @@ final class BridgePolicy {
         }
         let lists = projectLists(for: request)
         for name in names {
-            if let list = listWithout(name, in: lists) {
-                return Problem(message: "\(name) isn't in \(Self.tidy(list.path)), the list of keys this project uses, so it can't "
-                    + "be used here. Ask the user to add it to that file if the project needs it.")
-            }
-            guard let record = store.record(name), isAvailable(record, for: request) else {
-                let folders = store.record(name)?.projectFolders.map(Self.tidy).joined(separator: ", ") ?? "some folders"
-                let here = Self.tidy(request.projectFolder ?? request.cwd)
-                return Problem(message: "\(name) can only be used in \(folders), not in \(here).")
-            }
+            if let problem = placeProblem(name, request: request, lists: lists) { return Problem(message: problem) }
         }
         // A command with a key's value written into it would leave the value in
         // Claude's transcript; it should use $NAME instead. Which key it was
@@ -309,6 +322,21 @@ final class BridgePolicy {
                 return Problem(message: "The command has the value of a stored key written into it. Refer to keys as "
                     + "\"$NAME\" and list them in secretNames instead.", containsValue: true)
             }
+        }
+        return nil
+    }
+
+    /// Why a key (or password) can't be used from where the request comes
+    /// from: a project's .keybar leaves it out, or it's limited to other folders
+    private func placeProblem(_ name: String, request: BridgeRequest, lists: [ProjectKeys]) -> String? {
+        if let list = listWithout(name, in: lists) {
+            return "\(name) isn't in \(Self.tidy(list.path)), the list of keys this project uses, so it can't "
+                + "be used here. Ask the user to add it to that file if the project needs it."
+        }
+        guard let record = store.record(name), isAvailable(record, for: request) else {
+            let folders = store.record(name)?.projectFolders.map(Self.tidy).joined(separator: ", ") ?? "some folders"
+            let here = Self.tidy(request.projectFolder ?? request.cwd)
+            return "\(name) can only be used in \(folders), not in \(here)."
         }
         return nil
     }
@@ -385,14 +413,142 @@ final class BridgePolicy {
     /// Why Claude can't ask for this key, or what to tell it straight away
     /// (nil: show the Add window)
     func requestAnswer(_ request: BridgeRequest) -> BridgeReply? {
+        if request.secretType == .password { return passwordRequestAnswer(request) }
         guard let name = request.names?.first, request.names?.count == 1, SecretName.isValid(name) else {
             return .failure("Ask for one key, by a name like CLOUDFLARE_API_TOKEN.")
         }
         if let record = store.record(name) {
             if record.isArchived { return .failure("\(name) is archived in KeyBar. Ask the user to restore it.") }
+            if record.isPassword { return BridgeReply(ok: true, message: "\(name) is a website password in KeyBar. Use it with fill_password.") }
             return BridgeReply(ok: true, message: "\(name) is already in KeyBar. Use it with run_with_secrets.")
         }
         return nil
+    }
+
+    /// The same, for a password Claude asks for: by website, the name optional
+    private func passwordRequestAnswer(_ request: BridgeRequest) -> BridgeReply? {
+        guard let site = request.site.flatMap({ try? LoginSite.normalise($0) }) else {
+            return .failure("Say which website the password is for, e.g. liverpoolfc.com.")
+        }
+        let names = request.names ?? []
+        guard names.count <= 1 else { return .failure("Ask for one password at a time.") }
+        if let name = names.first {
+            guard SecretName.isValid(name) else { return .failure("\"\(name)\" can't be a name. Use one like LOGIN_LIVERPOOLFC, or leave it out.") }
+            if let record = store.record(name) {
+                guard record.isPassword else { return .failure("\(name) is already an API key in KeyBar. Ask for the password under another name.") }
+                if record.isArchived { return .failure("\(name) is archived in KeyBar. Ask the user to restore it.") }
+                return BridgeReply(ok: true, message: "\(name) is already in KeyBar. Use it with fill_password.")
+            }
+        }
+        let existing = store.passwords(for: site).map(\.name)
+        if !existing.isEmpty {
+            return BridgeReply(ok: true, message: "KeyBar already has \(existing.count == 1 ? "a password" : "passwords") for \(site): "
+                + "\(existing.joined(separator: ", ")). Use \(existing.count == 1 ? "it" : "one") with fill_password.")
+        }
+        if let archived = store.archived.first(where: { $0.isPassword && LoginSite.matches(site, websites: $0.sites) }) {
+            return .failure("\(archived.name), the password for \(site), is archived in KeyBar. Ask the user to restore it.")
+        }
+        return nil
+    }
+
+    // MARK: - Filling passwords
+
+    /// Why a password can't be filled for this request, or nil if KeyBar may
+    /// look for its login page. The same rules as using a key: it must exist,
+    /// not be archived, and be allowed in this project and folder.
+    func fillProblem(_ request: BridgeRequest) -> String? {
+        guard let name = request.names?.first, request.names?.count == 1 else { return "Fill one password at a time." }
+        guard let record = store.record(name) else {
+            let stored = store.activePasswords.map(\.name).joined(separator: ", ")
+            return "KeyBar has no password called \(name). "
+                + (stored.isEmpty ? "No website passwords are stored yet; ask for one with request_secret." : "Stored passwords: \(stored).")
+        }
+        guard record.isPassword else {
+            return "\(name) is an API key, not a website password, so it can't be filled into a page. Use it with run_with_secrets."
+        }
+        if record.isArchived { return "\(name) is archived in KeyBar. Ask the user to restore it if needed." }
+        if let problem = placeProblem(name, request: request, lists: projectLists(for: request)) { return problem }
+        guard !record.sites.isEmpty else {
+            return "\(name) has no website saved, so KeyBar can't tell where it may go. Ask the user to add one in KeyBar."
+        }
+        if let site = request.site {
+            guard let host = try? LoginSite.normalise(site),
+                  LoginSite.matches(host, websites: record.sites) || record.sites.contains(where: { LoginSite.matches($0, websites: [host]) }) else {
+                return "\(site) isn't one of \(name)'s websites (\(record.sites.joined(separator: ", ")))."
+            }
+        }
+        guard accessibility() else { return FillProblem.notTrusted.message }
+        return nil
+    }
+
+    /// The websites a fill may go to
+    func websites(for request: BridgeRequest) -> [String] {
+        request.names?.first.flatMap { store.record($0) }?.sites ?? []
+    }
+
+    /// What to ask with Touch ID before filling into this page, or nil if
+    /// the rules say not to ask (as for keys: Settings, the password's own
+    /// rule, a recent yes for the same password on the same site)
+    func fillPrompt(_ request: BridgeRequest, site: String, browser: String) -> String? {
+        guard let settings, fillProblem(request) == nil else { return nil }
+        let seconds = Self.approvalSeconds(for: request, setting: settings.approvalSeconds,
+                                           keys: (request.names ?? []).compactMap { store.record($0)?.approval })
+        guard seconds != 0 else { return nil }
+        if seconds > 0, let approved = approvals[Self.approvalScope(request, site: site)],
+           Date().timeIntervalSince(approved) < seconds {
+            return nil
+        }
+        let name = request.names?.first ?? ""
+        return "let \(Self.promptCommand(request.client)) fill your password for \(Self.promptCommand(site)) in \(browser) (\(name))"
+    }
+
+    func approvedFill(_ request: BridgeRequest, site: String) {
+        approvals[Self.approvalScope(request, site: site)] = Date()
+    }
+
+    /// The password, read only once the fill may go ahead
+    func passwordValue(_ request: BridgeRequest) -> Result<String, FillProblem> {
+        guard let name = request.names?.first, fillProblem(request) == nil else {
+            return .failure(.failed(fillProblem(request) ?? "nothing to fill."))
+        }
+        do {
+            return .success(try store.value(name))
+        } catch {
+            return .failure(.failed("couldn't read \(name) from the Keychain: \(error.localizedDescription)"))
+        }
+    }
+
+    private func fillEntry(_ action: ActivityEntry.Action, _ request: BridgeRequest, detail: String) -> ActivityEntry {
+        let source = source(request)
+        return ActivityEntry(action: action, source: source, names: request.names ?? [], program: ActivityEntry.fillProgram,
+                             folder: request.projectFolder ?? request.cwd, detail: detail,
+                             client: source == .other ? request.client : nil)
+    }
+
+    private static func place(_ site: String?, _ browser: String?) -> String? {
+        guard let site else { return nil }
+        return browser.map { "\(site) in \($0)" } ?? site
+    }
+
+    /// Logs a fill that was turned away or didn't work
+    func refuseFill(_ request: BridgeRequest, _ reason: String, site: String? = nil, browser: String? = nil) -> BridgeReply {
+        let detail = [Self.place(site, browser), reason].compactMap { $0 }.joined(separator: ": ")
+        log.add(fillEntry(.refused, request, detail: detail))
+        return .failure(reason)
+    }
+
+    func declinedFill(_ request: BridgeRequest, site: String, browser: String) -> BridgeReply {
+        let reason = "You didn't allow it in KeyBar's Touch ID prompt."
+        log.add(fillEntry(.refused, request, detail: "\(site) in \(browser): \(reason)"))
+        return .failure(reason + " Ask the user before trying again.")
+    }
+
+    func filled(_ request: BridgeRequest, site: String, browser: String) -> BridgeReply {
+        let name = request.names?.first ?? ""
+        store.markUsed([name])
+        log.add(fillEntry(.filled, request, detail: "\(site) in \(browser)"))
+        return BridgeReply(ok: true, message: "Filled \(name)'s password into the password field on \(site) in \(browser). "
+            + "Submit the form now (click the sign-in button or press Return). KeyBar typed it; it isn't shown to you.")
     }
 
     private func finished(_ request: BridgeRequest) -> BridgeReply {

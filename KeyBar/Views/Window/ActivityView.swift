@@ -19,7 +19,7 @@ struct ActivityView: View {
 
     var body: some View {
         Screen {
-            ScreenHeader(title: "Activity", subtitle: "When each key was used and what used it. Values are never logged.") {
+            ScreenHeader(title: "Activity", subtitle: "When each key or password was used and what used it. Values are never logged.") {
                 if !state.log.entries.isEmpty {
                     ConfirmButton(title: "Clear", confirmTitle: "Clear the log?") { state.log.clear() }
                 }
@@ -37,8 +37,8 @@ struct ActivityView: View {
             if entries.isEmpty {
                 MessageCard(title: "Nothing yet",
                             message: filter == .claudeCode
-                                ? "When Claude Code runs a command with one of your keys, it shows up here: which key, which program and how it went."
-                                : "Showing, copying, adding and using keys shows up here.",
+                                ? "When Claude Code runs a command with one of your keys, or fills one of your passwords into a login page, it shows up here: which one, where and how it went."
+                                : "Showing, copying, adding and using keys and passwords shows up here.",
                             mood: .sleepy, fill: AppColors.mint) { EmptyView() }
             } else {
                 VStack(spacing: 6) {
@@ -111,6 +111,7 @@ struct ActivityRow: View {
         case .stopped: return "hand.raised.fill"
         case .rotated: return "arrow.triangle.2.circlepath"
         case .hid: return "eye.slash.fill"
+        case .filled: return "rectangle.and.pencil.and.ellipsis"
         }
     }
 
@@ -118,7 +119,7 @@ struct ActivityRow: View {
         switch entry.action {
         case .ran: return AppColors.mint
         case .refused, .deleted, .deletedEverything: return AppColors.coral
-        case .revealed, .copied: return AppColors.butter
+        case .revealed, .copied, .filled: return AppColors.butter
         default: return AppColors.lilac
         }
     }

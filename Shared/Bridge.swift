@@ -55,6 +55,18 @@ enum Bridge {
     /// waits for a reply when there might be one (a little longer)
     static let approvalTimeout: TimeInterval = 170
     static let resolveTimeout: TimeInterval = 180
+    /// For `fill`: a Touch ID prompt, and finding and filling the field
+    static let fillTimeout: TimeInterval = 200
+}
+
+/// What a stored item is. Saved only for passwords: an item without one (every
+/// item from before passwords) is an API key.
+enum SecretType: String, Codable, Sendable, CaseIterable {
+    /// An API key or token: commands get it as an environment variable
+    case apiKey
+    /// A website password: never given to commands, only filled into a login
+    /// page on one of its websites
+    case password
 }
 
 struct BridgeRequest: Codable, Sendable {
@@ -73,6 +85,9 @@ struct BridgeRequest: Codable, Sendable {
         /// Which stored keys are in some text (a commit's changes), by name:
         /// never values either way
         case check
+        /// Fill a stored password into the login page open in a browser. The
+        /// app finds the page and types it; the helper never sees the value.
+        case fill
     }
 
     var action: Action
@@ -98,6 +113,13 @@ struct BridgeRequest: Codable, Sendable {
     /// For `keybar run`: the terminal it was typed in, which an approval is
     /// limited to
     var terminal: String? = nil
+    /// For `fill`: which of the password's websites to fill, when it has
+    /// several. For `request`: the website a password is wanted for.
+    var site: String? = nil
+    /// For `request`: a password rather than an API key
+    var secretType: SecretType? = nil
+    /// For `request`: a password's user name, to fill in
+    var username: String? = nil
 }
 
 /// A stored key as the helper sees it: everything but the value
@@ -117,6 +139,12 @@ struct SecretSummary: Codable, Sendable, Equatable {
     /// Used through KeyBar's proxy: commands get a placeholder, and this
     /// variable (e.g. ANTHROPIC_BASE_URL) is the address to call instead
     var proxyVariable: String? = nil
+    /// A website password: filled into login pages with fill_password, never
+    /// given to commands
+    var isPassword: Bool? = nil
+    /// A password's user name (not secret) and websites
+    var username: String? = nil
+    var websites: [String]? = nil
 }
 
 struct BridgeReply: Codable, Sendable {
@@ -127,7 +155,7 @@ struct BridgeReply: Codable, Sendable {
     /// Which of `values` are files, by key name: the file's name
     var files: [String: String]? = nil
     var runID: String? = nil
-    /// What happened, for `send` and `request`
+    /// What happened, for `send`, `request` and `fill`
     var message: String? = nil
     /// For `resolve`: more variables to set, for keys used through KeyBar's
     /// proxy (e.g. ANTHROPIC_BASE_URL). The helper only takes the names in
