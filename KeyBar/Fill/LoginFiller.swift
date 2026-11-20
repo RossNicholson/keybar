@@ -128,7 +128,9 @@ final class LoginFiller: @unchecked Sendable {
                 return fail(.couldNotFocus(host: host, browser: browserName))
             }
             // Leave Accessibility on only where the fill still needs it
-            turnedOn.filter { !CFEqual($0, chosen.restore) }.forEach(Self.turnOffWebAccessibility)
+            // (CFEqual traps on nil: a Safari fill with Chrome open has none)
+            turnedOn.filter { other in chosen.restore.map { !CFEqual(other, $0) } ?? true }
+                .forEach(Self.turnOffWebAccessibility)
             return .success(FillTarget(browser: browserName, pid: chosen.pid, host: host, field: chosen.field,
                                        window: chosen.window, frames: chosen.frames, restore: chosen.restore))
         }
