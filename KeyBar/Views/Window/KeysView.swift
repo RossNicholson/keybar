@@ -37,7 +37,7 @@ struct KeysView: View {
                 }
             } else {
                 HStack(spacing: 12) {
-                    SearchField(text: $search, placeholder: "Search by name, service, website, group or note")
+                    SearchField(text: $search, placeholder: "Search by name, service, site, group or note")
                         .frame(maxWidth: 360)
                     if !state.store.archived.isEmpty || showArchived {
                         PillPicker(selection: $showArchived, options: [false, true], track: AppColors.ground) {

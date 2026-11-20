@@ -10,6 +10,8 @@ struct AddKeyView: View {
     /// Set when Claude Code asked for this key: its name is filled in and
     /// its reason shown
     var request: KeyRequest? = nil
+    /// Which kind the form starts on
+    var startingType: SecretType = .apiKey
     let done: () -> Void
 
     @State private var name = ""
@@ -42,7 +44,7 @@ struct AddKeyView: View {
             && (!isPassword || !websites.isEmpty || !typedWebsite.trimmingCharacters(in: .whitespaces).isEmpty)
     }
     private var title: String {
-        if let request { return "\(request.client) asks for \(request.isPassword ? "a password" : "a key")" }
+        if let request { return "\(request.client) \(request.isPassword ? "needs a login" : "asks for a key")" }
         return isPassword ? "Add a password" : "Add a key"
     }
 
@@ -122,6 +124,7 @@ struct AddKeyView: View {
         }
         .popoverChrome(width: compact ? 300 : 460)
         .onAppear {
+            type = startingType
             if let request {
                 if request.isPassword {
                     type = .password

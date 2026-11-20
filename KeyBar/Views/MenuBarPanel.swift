@@ -41,7 +41,7 @@ struct MenuBarPanel: View {
     // MARK: - Header
 
     private var header: some View {
-        PanelHeader(title: "KeyBar", subtitle: "Your keys and passwords") {
+        PanelHeader(title: "KeyBar", subtitle: "Keys and logins") {
             Mascot(size: PanelMetrics.mascot)
         } actions: {
             HeaderIconButton(symbol: "plus", help: "Add a key") { showingAdd.toggle() }
@@ -131,7 +131,7 @@ struct MenuBarPanel: View {
         PanelFooter {
             let passwords = state.store.activePasswords.count
             let count = state.store.active.count - passwords
-            let keys = "\(count) key\(count == 1 ? "" : "s")" + (passwords == 0 ? "" : " · \(passwords) password\(passwords == 1 ? "" : "s")")
+            let keys = "\(count) key\(count == 1 ? "" : "s")" + (passwords == 0 ? "" : " · \(passwords) login\(passwords == 1 ? "" : "s")")
             switch state.claude.status {
             case .connected: Text("\(keys) · Claude Code connected")
             default: Text("\(keys) · Not connected")

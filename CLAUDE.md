@@ -12,9 +12,17 @@ RossNicholson/homebrew-tap.
   `Bridge/BridgeServer.swift` (socket server + `BridgePolicy`, the rules), `ClaudeCode/ClaudeConnector`
   (registers the MCP server, CLAUDE.md note, test), `Views/` (panel, add form) and `Views/Window/`.
 - `KeyBarHelper/`: the `keybar` tool, embedded at `KeyBar.app/Contents/Helpers/keybar`. `keybar mcp` is
-  the stdio MCP server (`list_secrets`, `run_with_secrets`). Target is `KeyBarHelper` with product
+  the stdio MCP server (tools and instructions in `Shared/MCPCatalog.swift`). Target is `KeyBarHelper` with product
   `keybar` and module `KeyBarHelper`: `KeyBar`/`keybar` collide on the case-insensitive disk otherwise.
-- `Shared/`: compiled into both: the socket protocol (`Bridge.swift`) and `Redactor` / `SecretName`.
+- `Shared/`: compiled into both: the socket protocol (`Bridge.swift`), `Redactor` / `SecretName`,
+  `LoginSite` (website normalising and https host matching for passwords), `SecretListing` (list_secrets
+  text) and `MCPCatalog`. Helper logic the tests need lives here: KeyBarTests only sees the app module.
+- `KeyBar/Fill/`: website password filling. `FillRules.swift` is the pure, tested part (which field,
+  problems, browsers, typing split); `LoginFiller.swift` is all the Accessibility code (find the AXWebArea
+  by AXURL, the AXSecureTextField in that frame, set all but the last character, type the last with a
+  CGEvent to the browser's pid, check AXNumberOfCharacters, clear on a mismatch). Chromium's web tree is
+  turned on with AXEnhancedUserInterface (Chrome answers -25208 but does it; needs ~2 s) and off after.
+  `BridgePolicy.fillProblem` and friends hold the rules; `AppDelegate.serveFill` runs them in order.
 
 ## How a use works
 Helper → `~/.keybar/keybar.sock` (0600, dir 0700) → app checks euid + code signature (same team,
@@ -38,6 +46,18 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
 - Don't connect Ross's real Claude Code from a dev build: it would register the build/dd path.
 
 ## Where we left off (2026-11-11)
+- **2026-11-20: website passwords, on branch `passwords`. NOT merged or released, no version bump.**
+  A record's `type` (nil = API key), `username` and `websites` are in the index and SyncedDetails (an older
+  KeyBar's details can't turn a password back into a key). Add form has API key / Password; editor,
+  list, panel, Settings (Accessibility card), Activity (`.filled`), demo data (LOGIN_THE_INTERNET for the
+  herokuapp demo) and the CLAUDE.md note (updated in place on launch by the connected copy) all know them.
+  New MCP tool `fill_password`; `request_secret` takes type/website/username. 145 tests pass. Fill engine
+  tested end to end with a harness (not the app itself) in Safari and Chrome on
+  the-internet.herokuapp.com/login, plus lookalike and http refusals. Ross still needs to: grant
+  Accessibility to a dev build, add a password, have Claude Code (connected to a dev build in a test
+  setup, not his real one) call fill_password, check the Touch ID prompt, the Activity entry and a
+  refusal. Not done: Firefox (out of scope), sites whose password field is in a cross-origin frame on
+  another domain (refused by design), a real-device check of Arc/Brave/Edge.
 - **2026-11-12: `keybar run` asks for Touch ID every time** (Ross's call): no approval is ever reused, whatever
   Settings or a key's own rule says. Closes the gap where a kept approval could be reused by something that
   edited the command's script or got past the Claude Code check. On main, waiting for release as 1.4.6.

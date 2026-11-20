@@ -90,6 +90,17 @@ final class ScreenshotTests: XCTestCase {
         try Snapshot.panel(to: out.appendingPathComponent("window-add-request.png")) {
             AddKeyView(request: request) {}.environment(state)
         }
+        try Snapshot.panel(to: out.appendingPathComponent("window-add-password.png")) {
+            AddKeyView(startingType: .password) {}.environment(state)
+        }
+        try Snapshot.panel(to: out.appendingPathComponent("window-edit-password.png")) {
+            KeyEditor(record: state.store.record("LOGIN_LIVERPOOLFC")!) {}.environment(state)
+        }
+        let passwordRequest = KeyRequest(name: "LOGIN_EXAMPLE", reason: "To sign in to the shop's admin and check today's orders.",
+                                         client: "Claude Code", website: "shop.example.com", username: "you@example.com")
+        try Snapshot.panel(to: out.appendingPathComponent("window-add-password-request.png")) {
+            AddKeyView(request: passwordRequest) {}.environment(state)
+        }
         try Snapshot.png(QuickCopyView(close: {}, copy: { _ in }).environment(state), size: QuickCopyView.size,
                          to: out.appendingPathComponent("quick-copy.png"))
         try Snapshot.panel(to: out.appendingPathComponent("window-find.png")) {

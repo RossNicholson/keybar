@@ -67,9 +67,10 @@ claude mcp add --scope user keybar -- /Applications/KeyBar.app/Contents/Helpers/
 
 | Tool | What it does |
 |---|---|
-| `list_secrets` | The stored keys' names, services and kinds (e.g. `CLOUDFLARE_API_TOKEN: Cloudflare API token`), and which are files or expire soon. Never values. |
+| `list_secrets` | The stored keys' names, services and kinds (e.g. `CLOUDFLARE_API_TOKEN: Cloudflare API token`), and which are files or expire soon, then the website passwords with their websites and username. Never values. |
 | `run_with_secrets` | Runs a shell command with the named keys set as environment variables. Returns the exit code, stdout and stderr, with every copy of a key replaced by `[REDACTED]`. |
-| `request_secret` | Asks you for a key KeyBar doesn't have. KeyBar opens *Add key* with the name filled in and Claude's reason (what it's for, where to make one) above it. You paste the key; Claude only hears that it's stored. |
+| `fill_password` | Types a stored website password into the login page open in your browser. See [Website passwords](#website-passwords). |
+| `request_secret` | Asks you for a key or website password KeyBar doesn't have. KeyBar opens *Add key* with the name (or the website and username) filled in and Claude's reason above it. You paste it; Claude only hears that it's stored. |
 | `send_secret` | Sends a stored key to a GitHub repo's Actions secrets, or a Cloudflare Worker or Pages project, so a deploy can use it. Always asks with Touch ID, whatever *Ask before Claude uses a key* is set to. |
 
 ### Other AI apps
@@ -153,6 +154,28 @@ KeyBar stopped this commit: it contains the value of a stored key.
 
 It works by pointing git's global `core.hooksPath` at `~/.keybar/hooks`. Each hook there runs the repo's own hook (`.git/hooks/…`) as well, so nothing you had stops working. If you already use a global hooks folder, KeyBar leaves it alone and gives you the line to add to your own `pre-commit`. A repo with its own `core.hooksPath` (Husky, say) isn't checked. Skip it once with `git commit --no-verify`. If KeyBar isn't running, commits go ahead with a warning.
 
+## Website passwords
+
+KeyBar can keep website passwords too, so Claude can log in to a site for you (in a browser it's driving, or one you have open) without ever seeing the password.
+
+In *Add key*, choose **Password**. Give the website (a domain like `liverpoolfc.com`, or paste the login page's address), the username and the password, or click **Generate** for a strong new one. You can add more than one website. KeyBar suggests a name like `LOGIN_LIVERPOOLFC`. Passwords are listed under *Passwords* with the site and username.
+
+When Claude needs to log in, it opens the login page, types the username itself, clicks into the password field and calls `fill_password`. KeyBar checks the page, asks with Touch ID (naming the site and the browser) and types the password into that field. Claude only hears which site and browser it filled, then submits the form.
+
+**The rules, enforced by the app:**
+
+- A password is only filled into a page served over **https** whose host is one of its websites or a subdomain of one. `accounts.liverpoolfc.com` is fine for `liverpoolfc.com`; `liverpoolfc.com.evil.io`, `evilliverpoolfc.com` and `http://liverpoolfc.com` are not. A login form in a frame must have every frame around it on the password's websites too.
+- It goes into a password field only: the focused one, or the only one on the page. With several and none focused, nothing is filled. The window has to be the browser's front window.
+- After typing, KeyBar checks the field holds the whole password and clears it if not.
+- The value never leaves the app: it isn't in any reply to Claude, the activity log or an error. `run_with_secrets`, `keybar run` and *Send* refuse passwords, so a command can't send one anywhere.
+- Touch ID, folder limits, `.keybar` lists and archiving work as they do for keys. Each fill and each refusal goes in the activity log with the app that asked and the site.
+
+**Browsers.** Safari (and Safari Technology Preview) and Chromium browsers: Chrome, Arc, Brave, Edge, Vivaldi and Chromium. Firefox isn't supported. In a Chromium browser the first fill can take a couple of seconds while the browser turns on the page's accessibility details; KeyBar turns them off again afterwards.
+
+**Permission.** Filling uses macOS Accessibility, so KeyBar needs to be allowed in System Settings → Privacy & Security → Accessibility. **Settings → Passwords** shows whether it is and has a button to ask. Until then `fill_password` tells Claude it can't fill.
+
+With iCloud sync, passwords sync like keys. Update KeyBar on all your Macs first: an older version shows a password as a key.
+
 ## Send keys to GitHub and Cloudflare
 
 Open a key, click **Send to GitHub or Cloudflare…** and tick the repos (or type a Worker or Pages project). After one Touch ID, KeyBar runs `gh secret set` or `wrangler secret put` with the value on the tool's standard input, so it's never on screen or in the process list. KeyBar remembers where each key went: after you paste in a new value, **Send again** puts it everywhere it was.
@@ -207,7 +230,8 @@ Sync needs KeyBar's provisioning profile, which only the builds from Homebrew an
 - **Knows 468 services.** CLOUDFLARE_API_TOKEN is recognised as Cloudflare's API token, STRIPE_PUBLISHABLE_KEY as Stripe's publishable key. The list is built in, so recognising one never touches the network.
 - **Recognises pasted keys.** Paste `sk-ant-…`, `ghp_…`, `sk_live_…` and dozens more and the name is filled in for you. Paste a whole `NAME=value` line and both fields fill.
 - **Imports .env files.** Pick which lines to bring in, then delete the file. Or let [Find keys](#find-keys-on-this-mac) find them all.
-- **Groups, order and notes.** Group keys by project (or leave them under their service), rename or ungroup a group, and put keys in your own order from the right-click menu. Search by name, service, group or note.
+- **Groups, order and notes.** Group keys by project (or leave them under their service), rename or ungroup a group, and put keys in your own order from the right-click menu. Search by name, service, website, group or note.
+- **Website passwords.** Claude logs in to sites with `fill_password` and never sees the password. See [Website passwords](#website-passwords).
 - **Archive.** File away a key you're not using: it stays in the Keychain but Claude can't see or use it until you restore it.
 - **Menu bar dot.** A coral dot on the key while Claude Code isn't connected (you can turn it off).
 - **Delete, even when stuck.** If the Keychain won't delete an item, KeyBar can take it off its list and leave it for Keychain Access.
