@@ -46,6 +46,8 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
 - Don't connect Ross's real Claude Code from a dev build: it would register the build/dd path.
 
 ## Where we left off (2026-11-11)
+- **2026-11-27: 1.5.2 RELEASED** (tap bumped). Fix: the panel's key list fills a panel dragged taller
+  (saved `panelSize`) instead of staying 6 rows with a blank gap; `make screenshots` now renders `panel-tall.png`.
 - **2026-11-27: logins reworked on branch `passwords`, tested on screen with Ross, waiting to release as 1.5.0.**
   Ross's rules: usernames and passwords work like keys and Claude never sees either; KeyBar starts locked down
   and the user opens it up. So: list_secrets never sends usernames (SecretSummary has hasUsername/inCommands,
