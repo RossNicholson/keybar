@@ -2,12 +2,16 @@ import Foundation
 import Observation
 
 /// One thing that happened to a key: when, what, who did it and, for a
-/// command, which program it ran. Never the key's value.
+/// command, which program it ran (for a password, the site it was filled
+/// into). Never the key's value.
 struct ActivityEntry: Codable, Identifiable, Hashable, Sendable {
     enum Action: String, Codable, Sendable {
         case ran, refused, revealed, copied, added, changed, renamed, deleted, imported, deletedEverything, sent, requested, tested,
-             stopped, rotated, hid
+             stopped, rotated, hid, filled
     }
+
+    /// `program` for a password fill, so a refused one reads "Refused to fill"
+    static let fillProgram = "fill_password"
 
     enum Source: String, Codable, Sendable {
         case you, claudeCode, other
@@ -38,7 +42,7 @@ struct ActivityEntry: Codable, Identifiable, Hashable, Sendable {
     var summary: String {
         switch action {
         case .ran: return "Ran \(program ?? "a command")"
-        case .refused: return "Refused \(program ?? "a command")"
+        case .refused: return program == Self.fillProgram ? "Refused to fill" : "Refused \(program ?? "a command")"
         case .revealed: return "Revealed"
         case .copied: return "Copied"
         case .added: return "Added"
@@ -53,6 +57,7 @@ struct ActivityEntry: Codable, Identifiable, Hashable, Sendable {
         case .stopped: return "Stopped a commit with"
         case .rotated: return "Rotated"
         case .hid: return "Hid a leaked copy of"
+        case .filled: return "Filled"
         }
     }
 }

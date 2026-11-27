@@ -30,14 +30,14 @@ struct KeysView: View {
 
             if state.store.active.isEmpty && state.store.archived.isEmpty {
                 MessageCard(title: "No keys yet",
-                            message: "Add your API keys once: Claude, Cloudflare, GitHub, anything. They go in your Mac's Keychain, and Claude Code can use them by name without ever seeing them. Already have keys in .env files? Find them.",
+                            message: "Add your API keys once: Claude, Cloudflare, GitHub, anything. They go in your Mac's Keychain, and Claude Code can use them by name without ever seeing them. Website passwords too: KeyBar fills them into login pages for Claude. Already have keys in .env files? Find them.",
                             fill: AppColors.butter) {
                     PillButton(title: "Find keys on this Mac", symbol: "magnifyingglass") { finding = true }
                     GhostButton(title: "Add a key", symbol: "plus") { showingAdd = true }
                 }
             } else {
                 HStack(spacing: 12) {
-                    SearchField(text: $search, placeholder: "Search by name, service, group or note")
+                    SearchField(text: $search, placeholder: "Search by name, service, site, group or note")
                         .frame(maxWidth: 360)
                     if !state.store.archived.isEmpty || showArchived {
                         PillPicker(selection: $showArchived, options: [false, true], track: AppColors.ground) {
@@ -104,8 +104,12 @@ struct KeysView: View {
     }
 
     private var subtitle: String {
-        let count = state.store.records.count
-        return count == 0 ? "Nothing stored yet" : "\(count) key\(count == 1 ? "" : "s") in your Keychain. Only their names are listed here until you show one."
+        let passwords = state.store.records.filter(\.isPassword).count
+        let keys = state.store.records.count - passwords
+        guard keys + passwords > 0 else { return "Nothing stored yet" }
+        var counted = ["\(keys) key\(keys == 1 ? "" : "s")"]
+        if passwords > 0 { counted.append("\(passwords) password\(passwords == 1 ? "" : "s")") }
+        return "\(counted.joined(separator: " and ")) in your Keychain. Only their names are listed here until you show one."
     }
 
     private func chooseEnvFile() {
@@ -161,6 +165,10 @@ struct KeyRow: View {
                         TagPill(text: "file", fill: AppColors.periwinkle)
                             .help("\(fileName): commands get the path to a private copy")
                     }
+                    if record.isPassword {
+                        TagPill(text: "password", fill: AppColors.butter)
+                            .help("Filled into login pages on \(record.sites.joined(separator: ", ")) with fill_password. Never given to commands.")
+                    }
                     if !record.sentTo.isEmpty {
                         TagPill(text: "sent to \(record.sentTo.count)", fill: AppColors.mint)
                             .help(record.sentTo.map(\.label).joined(separator: "\n"))
@@ -195,13 +203,19 @@ struct KeyRow: View {
         .opacity(record.isArchived ? 0.7 : 1)
         .contextMenu {
             Button("Copy Name") { Clipboard.copyText(record.name) }
-            Button("Copy as $\(record.name)") { Clipboard.copyText("$\(record.name)") }
+            if record.isPassword {
+                if let username = record.username {
+                    Button("Copy Username") { Clipboard.copyText(username) }
+                }
+            } else {
+                Button("Copy as $\(record.name)") { Clipboard.copyText("$\(record.name)") }
+            }
             Button("Edit…", action: edit)
             Divider()
             Button("Move Up") { state.store.move(record.name, by: -1) }
             Button("Move Down") { state.store.move(record.name, by: 1) }
             Menu("Move to Group") {
-                Button(record.service.map { "Under \($0.name)" } ?? "No Group") { state.store.setGroup(record.name, nil) }
+                Button(record.isPassword ? "Under Passwords" : record.service.map { "Under \($0.name)" } ?? "No Group") { state.store.setGroup(record.name, nil) }
                     .disabled(record.group == nil)
                 let groups = state.store.customGroups.filter { $0 != record.group }
                 if !groups.isEmpty { Divider() }
@@ -242,28 +256,42 @@ struct KeyEditor: View {
     @State private var approval: ApprovalChoice = .settings
     @State private var proxied = false
     @State private var rotating = false
+    @State private var websites: [String] = []
+    @State private var typedWebsite = ""
+    @State private var username = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 ServiceTile(record: record, size: 44)
                 PopoverHeader(title: record.name,
-                              subtitle: [record.service?.name, record.kind].compactMap { $0 }.joined(separator: " · "))
+                              subtitle: record.isPassword ? "Password · \(record.loginSummary)"
+                                : [record.service?.name, record.kind].compactMap { $0 }.joined(separator: " · "))
             }
 
             HStack(alignment: .top, spacing: 10) {
-                field("Name", detail: "the environment variable") {
+                field("Name", detail: record.isPassword ? "how Claude asks for it" : "the environment variable") {
                     HouseField(placeholder: record.name, text: $name)
                 }
                 field("Group", detail: "optional") {
-                    HouseField(placeholder: record.service?.name ?? "Other", text: $group, mono: false)
+                    HouseField(placeholder: record.isPassword ? "Passwords" : record.service?.name ?? "Other", text: $group, mono: false)
                     GroupSuggestions(text: $group)
                 }
             }
             field("Note", detail: "optional") {
                 HouseField(placeholder: "What it's for", text: $note, mono: false)
             }
-            if let fileName = record.fileName {
+            if record.isPassword {
+                field("Websites", detail: "and their subdomains; only https pages") {
+                    WebsitesField(websites: $websites, typed: $typedWebsite, error: $error)
+                }
+                field("Username", detail: "or email") {
+                    HouseField(placeholder: "you@example.com", text: $username, mono: false)
+                }
+                field("New password", detail: "leave empty to keep the current one") {
+                    PasswordValueField(value: $newValue, placeholder: "Type or generate a new password")
+                }
+            } else if let fileName = record.fileName {
                 field("File", detail: newFile == nil ? "commands get the path to a private copy" : "replaces \(fileName) when you save") {
                     HStack(spacing: 8) {
                         FileValueRow(fileName: newFile?.name ?? fileName, size: newFile?.contents.utf8.count)
@@ -276,7 +304,9 @@ struct KeyEditor: View {
                     HouseField(placeholder: "Paste a new value", text: $newValue, secure: true)
                 }
             }
-            ExpiryField(on: $expires, date: $expiresAt)
+            if !record.isPassword {
+                ExpiryField(on: $expires, date: $expiresAt)
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 FieldLabel(text: "Project folders",
@@ -304,7 +334,7 @@ struct KeyEditor: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                FieldLabel(text: "Touch ID", detail: "before a command uses it")
+                FieldLabel(text: "Touch ID", detail: record.isPassword ? "before Claude has it filled in" : "before a command uses it")
                 PillPicker(selection: $approval, options: ApprovalChoice.allCases, track: AppColors.surface) { $0.title }
                 if approval == .never {
                     Text("Claude and other apps can use it without asking you. Only for keys that don't matter if they leak.")
@@ -331,28 +361,14 @@ struct KeyEditor: View {
 
             sentTo
 
-            HStack(spacing: 8) {
-                GhostButton(title: "Rotate…", symbol: "arrow.triangle.2.circlepath") { rotating = true }
-                    .fixedSize()
-                    .help("Swap in a new key and send it everywhere this one went")
-                GhostButton(title: "Send to GitHub or Cloudflare…", symbol: "paperplane") { sending = true }
-                    .fixedSize()
-                if KeyTester.canTest(record) {
-                    GhostButton(title: testing ? "Testing…" : "Test", symbol: "checkmark.seal") { test() }
-                        .fixedSize()
-                        .disabled(testing)
-                        .help("Asks \(record.service?.name ?? "the service") whether the key works. Nothing is changed.")
-                }
-                Spacer(minLength: 0)
-            }
-            if let testResult {
-                SettingNote(testResult.summary + (testResult.expiresAt.map { " It expires \($0.formatted(date: .abbreviated, time: .omitted))." } ?? ""))
+            if !record.isPassword {
+                keyTools
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Added \(record.createdAt.formatted(date: .abbreviated, time: .shortened)) · changed \(record.updatedAt.formatted(date: .abbreviated, time: .shortened))")
                 if let used = record.lastUsedAt {
-                    Text("Last used by a command \(used.formatted(date: .abbreviated, time: .shortened))")
+                    Text("Last used \(record.isPassword ? "in a login page" : "by a command") \(used.formatted(date: .abbreviated, time: .shortened))")
                 }
             }
             .font(.mono(9.5))
@@ -401,6 +417,8 @@ struct KeyEditor: View {
             folders = record.projectFolders
             approval = ApprovalChoice(record.approval)
             proxied = record.proxied == true
+            websites = record.sites
+            username = record.username ?? ""
             if let date = record.expiresAt {
                 expires = true
                 expiresAt = date
@@ -413,6 +431,27 @@ struct KeyEditor: View {
         .sheet(isPresented: $rotating) {
             RotateKeyView(name: record.name) { rotating = false }
                 .environment(state)
+        }
+    }
+
+    /// Rotate, Send and Test: for API keys only
+    @ViewBuilder private var keyTools: some View {
+        HStack(spacing: 8) {
+            GhostButton(title: "Rotate…", symbol: "arrow.triangle.2.circlepath") { rotating = true }
+                .fixedSize()
+                .help("Swap in a new key and send it everywhere this one went")
+            GhostButton(title: "Send to GitHub or Cloudflare…", symbol: "paperplane") { sending = true }
+                .fixedSize()
+            if KeyTester.canTest(record) {
+                GhostButton(title: testing ? "Testing…" : "Test", symbol: "checkmark.seal") { test() }
+                    .fixedSize()
+                    .disabled(testing)
+                    .help("Asks \(record.service?.name ?? "the service") whether the key works. Nothing is changed.")
+            }
+            Spacer(minLength: 0)
+        }
+        if let testResult {
+            SettingNote(testResult.summary + (testResult.expiresAt.map { " It expires \($0.formatted(date: .abbreviated, time: .omitted))." } ?? ""))
         }
     }
 
@@ -509,20 +548,32 @@ struct KeyEditor: View {
     private func save() {
         error = nil
         do {
+            // A password's websites are checked first, so nothing's half saved
+            var sites = websites
+            if record.isPassword {
+                if !typedWebsite.trimmingCharacters(in: .whitespaces).isEmpty {
+                    for site in try LoginSite.normaliseList(typedWebsite) where !sites.contains(site) { sites.append(site) }
+                }
+                guard !sites.isEmpty else { throw StoreError.noWebsite }
+            }
             var current = record.name
             let typed = name.trimmingCharacters(in: .whitespaces)
             if !typed.isEmpty, typed != record.name {
                 try state.rename(record.name, to: typed)
                 current = typed
             }
-            if let newFile {
+            if record.isPassword {
+                state.setLogin(current, username: username.trimmingCharacters(in: .whitespacesAndNewlines), websites: sites)
+                // A password is kept exactly as typed
+                if !newValue.isEmpty { try state.replaceValue(current, with: newValue) }
+            } else if let newFile {
                 try state.replaceValue(current, with: newFile.contents, fileName: newFile.name)
             } else if !newValue.isEmpty {
                 try state.replaceValue(current, with: newValue.trimmingCharacters(in: .whitespacesAndNewlines))
             }
-            state.setExpiry(current, expires ? expiresAt : nil)
+            if !record.isPassword { state.setExpiry(current, expires ? expiresAt : nil) }
             state.setApproval(current, approval.value)
-            state.setProxied(current, proxied)
+            if !record.isPassword { state.setProxied(current, proxied) }
             if var updated = state.store.record(current) {
                 let changed = updated.group != group.nonEmpty || updated.note != note.nonEmpty || updated.projectFolders != folders
                 updated.group = group
@@ -678,7 +729,7 @@ private struct AttentionCards: View {
             AttentionBanner(symbol: "archivebox",
                             title: unused.count == 1 ? "A key you haven't used" : "\(unused.count) keys you haven't used",
                             message: unused.map(\.name).joined(separator: ", ")
-                                + ": not used by a command on this Mac for \(KeyHealth.unusedDays) days. Archive to keep \(unused.count == 1 ? "it" : "them") out of Claude's reach until needed?",
+                                + ": not used by a command or a login on this Mac for \(KeyHealth.unusedDays) days. Archive to keep \(unused.count == 1 ? "it" : "them") out of Claude's reach until needed?",
                             fill: AppColors.butter) {
                 PillButton(title: "Archive", symbol: "archivebox") {
                     for record in unused { state.setArchived(record.name, true) }

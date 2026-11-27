@@ -3,7 +3,8 @@ import Observation
 
 /// A stored key, without its value. Saved in ~/.keybar/index.json.
 struct SecretRecord: Codable, Identifiable, Hashable, Sendable {
-    /// Also the environment variable it's set as, e.g. CLOUDFLARE_API_TOKEN
+    /// Also the environment variable it's set as, e.g. CLOUDFLARE_API_TOKEN.
+    /// A password has one too, as its unique name (LOGIN_LIVERPOOLFC).
     var name: String
     /// Optional, e.g. a project name. Keys without one are grouped by service.
     var group: String?
@@ -30,8 +31,18 @@ struct SecretRecord: Codable, Identifiable, Hashable, Sendable {
     /// Commands get a placeholder and a local address instead of the key, and
     /// KeyBar adds the key to their requests to the service (see KeyProxy)
     var proxied: Bool?
+    /// nil for an API key
+    var type: SecretType?
+    /// A password's user name or email. Not secret: Claude types it itself.
+    var username: String?
+    /// The hosts a password may be filled into (and their subdomains), e.g.
+    /// ["liverpoolfc.com"]. See LoginSite.
+    var websites: [String]?
 
     var id: String { name }
+    var isPassword: Bool { type == .password }
+    var secretType: SecretType { type ?? .apiKey }
+    var sites: [String] { websites ?? [] }
     var usesProxy: Bool { proxied == true && KeyProxy.route(for: self) != nil }
     var isFile: Bool { fileName != nil }
     var sentTo: [Destination] { destinations ?? [] }
@@ -46,9 +57,18 @@ struct SecretRecord: Codable, Identifiable, Hashable, Sendable {
     /// Expired, or expiring within `KeyHealth.soonDays`
     var expiresSoon: Bool { (daysUntilExpiry() ?? .max) <= KeyHealth.soonDays }
     var isArchived: Bool { archivedAt != nil }
-    var service: Service? { ServiceCatalog.match(name) }
-    var kind: String { CredentialKind.of(name) }
-    var displayGroup: String { group?.nonEmpty ?? service?.name ?? "Other" }
+    /// A password is for its websites, never a service: LOGIN_GITHUB mustn't
+    /// be tested against GitHub's API as if it were a token
+    var service: Service? { isPassword ? nil : ServiceCatalog.match(name) }
+    var kind: String { isPassword ? "Password" : CredentialKind.of(name) }
+    var displayGroup: String { group?.nonEmpty ?? (isPassword ? "Passwords" : service?.name ?? "Other") }
+    /// "liverpoolfc.com · ross@example.com", for a password's subtitle
+    var loginSummary: String {
+        var parts: [String] = []
+        if let first = sites.first { parts.append(sites.count > 1 ? "\(first) +\(sites.count - 1)" : first) }
+        if let username = username?.nonEmpty { parts.append(username) }
+        return parts.isEmpty ? "Password" : parts.joined(separator: " · ")
+    }
     var isRestricted: Bool { !projectFolders.isEmpty }
 
     /// Whether a command run in `folder` may use this key
@@ -85,6 +105,9 @@ struct SyncedDetails: Codable, Equatable {
     var destinations: [Destination]?
     var approval: KeyApproval?
     var proxied: Bool?
+    var type: SecretType?
+    var username: String?
+    var websites: [String]?
 
     init(_ record: SecretRecord) {
         group = record.group
@@ -99,6 +122,9 @@ struct SyncedDetails: Codable, Equatable {
         destinations = record.destinations
         approval = record.approval
         proxied = record.proxied
+        type = record.type
+        username = record.username
+        websites = record.websites
     }
 
     func apply(to record: inout SecretRecord) {
@@ -114,6 +140,15 @@ struct SyncedDetails: Codable, Equatable {
         record.destinations = destinations
         record.approval = approval
         record.proxied = proxied
+        // Details without a type were written by an API key, or by a KeyBar
+        // from before passwords, which drops what it doesn't know when it
+        // saves. A password keeps being one, with its websites, either way:
+        // it must never turn into a key commands can be given.
+        if type != nil || !record.isPassword {
+            record.type = type
+            record.username = username
+            record.websites = websites
+        }
     }
 
     var encoded: Data? {
@@ -135,6 +170,8 @@ enum StoreError: LocalizedError {
     case missing(String)
     case emptyValue
     case archived(String)
+    case noWebsite
+    case otherType(String, SecretType)
 
     var errorDescription: String? {
         switch self {
@@ -144,6 +181,9 @@ enum StoreError: LocalizedError {
         case .missing(let name): return "There's no key called \(name)."
         case .emptyValue: return "The key is empty."
         case .archived(let name): return "\(name) is archived. Restore it first."
+        case .noWebsite: return "Add the website the password is for."
+        case .otherType(let name, let type):
+            return "There's already \(type == .password ? "a password" : "an API key") called \(name)."
         }
     }
 }
@@ -266,19 +306,41 @@ final class SecretStore {
                 || ($0.service?.name.localizedCaseInsensitiveContains(query) ?? false)
                 || ($0.group?.localizedCaseInsensitiveContains(query) ?? false)
                 || ($0.note?.localizedCaseInsensitiveContains(query) ?? false)
+                || ($0.username?.localizedCaseInsensitiveContains(query) ?? false)
+                || $0.sites.contains { $0.localizedCaseInsensitiveContains(query) }
         }
+    }
+
+    var activeKeys: [SecretRecord] { active.filter { !$0.isPassword } }
+    var activePasswords: [SecretRecord] { active.filter(\.isPassword) }
+
+    /// The active passwords for a website (or a subdomain of one of theirs)
+    func passwords(for website: String) -> [SecretRecord] {
+        guard let host = try? LoginSite.normalise(website) else { return [] }
+        return activePasswords.filter { LoginSite.matches(host, websites: $0.sites) }
+    }
+
+    /// LOGIN_SITE for a password's first website, made unique
+    func suggestedPasswordName(for website: String) -> String {
+        let name = LoginSite.suggestedName(for: website)
+        guard record(name) != nil else { return name }
+        return Self.freeName(name, taken: Set(records.map(\.name)))
     }
 
     // MARK: - Changing
 
+    /// `login` set: a website password, with its user name and websites
     func add(name: String, value: String, group: String? = nil, note: String? = nil,
              projectFolders: [String] = [], fileName: String? = nil, expiresAt: Date? = nil,
-             replacing: Bool = false) throws {
+             login: (username: String?, websites: [String])? = nil, replacing: Bool = false) throws {
         guard SecretName.isValid(name) else { throw StoreError.invalidName(name) }
         guard !value.isEmpty else { throw StoreError.emptyValue }
+        if let login, login.websites.isEmpty { throw StoreError.noWebsite }
         let group = group.map { existingGroup($0) ?? "" }
         let existing = record(name)
         if existing != nil && !replacing { throw StoreError.duplicate(name) }
+        // A password is never replaced by a key of the same name, nor the other way
+        if let existing, existing.isPassword != (login != nil) { throw StoreError.otherType(name, existing.secretType) }
         try vault.write(name, value: value)
         forgotten.remove(name)
         let now = Date()
@@ -289,20 +351,31 @@ final class SecretStore {
             if !projectFolders.isEmpty { existing.projectFolders = projectFolders }
             if let fileName { existing.fileName = fileName }
             if let expiresAt { existing.expiresAt = expiresAt }
+            if let login {
+                existing.username = login.username?.nonEmpty
+                existing.websites = login.websites
+            }
             replace(existing)
         } else {
             replace(SecretRecord(name: name, group: group?.nonEmpty, note: note?.nonEmpty,
                                  projectFolders: projectFolders, createdAt: now, updatedAt: now,
-                                 fileName: fileName, expiresAt: expiresAt))
+                                 fileName: fileName, expiresAt: expiresAt,
+                                 type: login == nil ? nil : .password, username: login?.username?.nonEmpty,
+                                 websites: login?.websites))
         }
         save()
     }
 
-    /// Saves changed details (group, note, folders); not the value or name
+    /// Saves changed details (group, note, folders, a password's user name
+    /// and websites); not the value, name or type
     func update(_ record: SecretRecord) {
         var record = record
         record.group = existingGroup(record.group)
         record.note = record.note?.nonEmpty
+        record.username = record.username?.nonEmpty
+        if let current = self.record(record.name) { record.type = current.type }
+        // A password always has a website: an empty list leaves it as it was
+        if record.isPassword && record.sites.isEmpty { record.websites = self.record(record.name)?.websites }
         replace(record)
         save()
     }

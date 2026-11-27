@@ -45,6 +45,12 @@ final class ProjectKeysTests: XCTestCase {
 
 @MainActor
 final class PolicyAIDevTests: XCTestCase {
+    // The test host shares the app's defaults: put the user's Touch ID
+    // setting back after each test
+    private var savedApproval: TimeInterval = 0
+    override func setUp() async throws { savedApproval = AppSettings().approvalSeconds }
+    override func tearDown() async throws { AppSettings().approvalSeconds = savedApproval }
+
     func makePolicy(_ values: [String: String] = ["TOKEN": "t-value-1234567890", "OTHER": "o-value-1234567890"],
                     proxy: KeyProxy? = nil) -> (BridgePolicy, SecretStore, ActivityLog, AppSettings) {
         let store = SecretStore(vault: MemoryVault(values), indexURL: nil)

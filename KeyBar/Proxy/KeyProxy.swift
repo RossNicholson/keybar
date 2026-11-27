@@ -34,7 +34,7 @@ final class KeyProxy: @unchecked Sendable {
     /// How a key could be proxied, or nil if it can't: API keys for the
     /// services above (not OAuth tokens, which work differently)
     static func route(for record: SecretRecord) -> Route? {
-        guard !record.isFile, record.name.hasSuffix("_KEY"), !record.name.contains("OAUTH"),
+        guard !record.isFile, !record.isPassword, record.name.hasSuffix("_KEY"), !record.name.contains("OAUTH"),
               let service = ServiceCatalog.destination(for: record.name, among: Set(routes.keys)) else { return nil }
         return routes[service.name]
     }

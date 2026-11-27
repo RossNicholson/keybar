@@ -9,7 +9,15 @@ enum Bridge {
     /// ~/.keybar: the socket, the index of key names and the activity log.
     /// Key values are never written here; they live in the Keychain.
     static var directory: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".keybar", isDirectory: true)
+        #if DEBUG
+        // Debug builds only: a separate folder (socket, index, log) for
+        // end-to-end tests, so a dev copy never takes over the installed
+        // app's socket. Release builds ignore it.
+        if let folder = ProcessInfo.processInfo.environment["KEYBAR_DEV_DIR"], folder.hasPrefix("/") {
+            return URL(fileURLWithPath: folder, isDirectory: true)
+        }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".keybar", isDirectory: true)
     }
 
     static var socketPath: String { directory.appendingPathComponent("keybar.sock").path }
@@ -55,6 +63,39 @@ enum Bridge {
     /// waits for a reply when there might be one (a little longer)
     static let approvalTimeout: TimeInterval = 170
     static let resolveTimeout: TimeInterval = 180
+    /// For `fill`: a Touch ID prompt, finding and filling the fields, and
+    /// waiting for the page to sign in
+    static let fillTimeout: TimeInterval = 230
+
+    /// The variables a website login is set as in a command: its username and
+    /// its password, e.g. LOGIN_LIVERPOOLFC_USERNAME and _PASSWORD
+    static func loginVariables(_ name: String) -> (username: String, password: String) {
+        (name + "_USERNAME", name + "_PASSWORD")
+    }
+
+    /// Every variable a `resolve` for these names may set: the names
+    /// themselves, and each one's login variables. The helper keeps only
+    /// these, so a reply can't set anything else (BASH_ENV, PATH…).
+    static func allowedVariables(for names: [String]) -> Set<String> {
+        var allowed = Set(names)
+        for name in names {
+            let login = loginVariables(name)
+            allowed.insert(login.username)
+            allowed.insert(login.password)
+        }
+        return allowed
+    }
+}
+
+/// What a stored item is. Saved only for passwords: an item without one (every
+/// item from before passwords) is an API key.
+enum SecretType: String, Codable, Sendable, CaseIterable {
+    /// An API key or token: commands get it as an environment variable
+    case apiKey
+    /// A website login (username and password): filled into a login page on
+    /// one of its websites, and given to commands only if the user turns on
+    /// Settings → Logins in commands. Claude never sees either part.
+    case password
 }
 
 struct BridgeRequest: Codable, Sendable {
@@ -73,6 +114,9 @@ struct BridgeRequest: Codable, Sendable {
         /// Which stored keys are in some text (a commit's changes), by name:
         /// never values either way
         case check
+        /// Fill a stored password into the login page open in a browser. The
+        /// app finds the page and types it; the helper never sees the value.
+        case fill
     }
 
     var action: Action
@@ -98,6 +142,13 @@ struct BridgeRequest: Codable, Sendable {
     /// For `keybar run`: the terminal it was typed in, which an approval is
     /// limited to
     var terminal: String? = nil
+    /// For `fill`: which of the password's websites to fill, when it has
+    /// several. For `request`: the website a password is wanted for.
+    var site: String? = nil
+    /// For `request`: a password rather than an API key
+    var secretType: SecretType? = nil
+    /// For `request`: a password's user name, to fill in
+    var username: String? = nil
 }
 
 /// A stored key as the helper sees it: everything but the value
@@ -117,6 +168,15 @@ struct SecretSummary: Codable, Sendable, Equatable {
     /// Used through KeyBar's proxy: commands get a placeholder, and this
     /// variable (e.g. ANTHROPIC_BASE_URL) is the address to call instead
     var proxyVariable: String? = nil
+    /// A website login: filled into login pages with fill_password
+    var isPassword: Bool? = nil
+    /// Whether the login has a username saved. The username itself is never
+    /// sent: Claude doesn't see it.
+    var hasUsername: Bool? = nil
+    var websites: [String]? = nil
+    /// Commands can use the login (Settings → Logins in commands), as
+    /// $NAME_USERNAME and $NAME_PASSWORD
+    var inCommands: Bool? = nil
 }
 
 struct BridgeReply: Codable, Sendable {
@@ -127,7 +187,7 @@ struct BridgeReply: Codable, Sendable {
     /// Which of `values` are files, by key name: the file's name
     var files: [String: String]? = nil
     var runID: String? = nil
-    /// What happened, for `send` and `request`
+    /// What happened, for `send`, `request` and `fill`
     var message: String? = nil
     /// For `resolve`: more variables to set, for keys used through KeyBar's
     /// proxy (e.g. ANTHROPIC_BASE_URL). The helper only takes the names in

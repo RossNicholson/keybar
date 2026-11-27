@@ -76,9 +76,20 @@ enum TerminalRun {
         }
         for (name, value) in Bridge.proxyEnvironment(reply.environment) { environment[name] = value }
         let given = keyFiles.environment(values)
+        let allowed = Bridge.allowedVariables(for: plan.storedNames)
         for (variable, stored) in plan.keys {
-            guard let value = given[stored] else { fail("KeyBar didn't send \(stored).", code: 77) }
-            environment[variable] = value
+            if let value = given[stored] {
+                environment[variable] = value
+                continue
+            }
+            // A login: VARIABLE_USERNAME and VARIABLE_PASSWORD
+            let login = Bridge.loginVariables(stored)
+            guard allowed.contains(login.password), let password = given[login.password] else {
+                fail("KeyBar didn't send \(stored).", code: 77)
+            }
+            let set = Bridge.loginVariables(variable)
+            environment[set.password] = password
+            if let username = given[login.username] { environment[set.username] = username }
         }
 
         let status = spawn(plan.command, environment: environment)
