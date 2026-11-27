@@ -168,7 +168,7 @@ struct AddKeyView: View {
             FieldLabel(text: "Touch ID", detail: "before Claude signs in with it")
             PillPicker(selection: $approval, options: ApprovalChoice.allCases, track: compact ? AppColors.surface : AppColors.ground) { $0.title }
             if approval == .never {
-                Text("Claude and other apps can sign in with it without asking you. Only for logins that don't matter if they leak.")
+                Text("Claude can sign in with it without asking you. Fine for accounts that don't matter much, like competition sites.")
                     .font(.mono(9.5))
                     .foregroundStyle(AppColors.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
