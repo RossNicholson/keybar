@@ -32,9 +32,6 @@ struct AddKeyView: View {
     /// The name last suggested from the first website: while the name is
     /// still that, a new first website suggests a new one
     @State private var siteSuggestion = ""
-    /// The login's own Touch ID rule. Only ever the user's choice here: a
-    /// request from Claude can't set it.
-    @State private var approval: ApprovalChoice = .settings
 
     private var isPassword: Bool { type == .password }
     private var finalName: String { SecretName.isValid(name) ? name : SecretName.normalized(name) }
@@ -164,16 +161,6 @@ struct AddKeyView: View {
                     .foregroundStyle(AppColors.secondaryText)
             }
         }
-        VStack(alignment: .leading, spacing: 5) {
-            FieldLabel(text: "Touch ID", detail: "before Claude signs in with it")
-            PillPicker(selection: $approval, options: ApprovalChoice.allCases, track: compact ? AppColors.surface : AppColors.ground) { $0.title }
-            if approval == .never {
-                Text("Claude can sign in with it without asking you. Fine for accounts that don't matter much, like competition sites.")
-                    .font(.mono(9.5))
-                    .foregroundStyle(AppColors.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
     }
 
     /// LOGIN_SITE from the first website, unless a name was typed
@@ -270,7 +257,6 @@ struct AddKeyView: View {
                 // A password is kept exactly as typed: spaces can be part of it
                 try state.add(name: name, value: value, group: group, note: note,
                               login: (username.trimmingCharacters(in: .whitespacesAndNewlines), websites))
-                if let rule = approval.value { state.setApproval(name, rule) }
                 request?.added = name
             } else {
                 // A file is kept exactly as it is; a pasted key loses stray spaces
