@@ -5,5 +5,5 @@
 
 extension AppInfo {
     static let keyBar = AppInfo(name: "KeyBar", repo: "keybar", cask: "keybar",
-                                coffeeLine: "If KeyBar keeps your API keys safe")
+                                coffeeLine: "If KeyBar keeps your API keys and passwords safe")
 }

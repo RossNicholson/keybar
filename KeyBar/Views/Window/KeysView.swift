@@ -30,7 +30,7 @@ struct KeysView: View {
 
             if state.store.active.isEmpty && state.store.archived.isEmpty {
                 MessageCard(title: "No keys yet",
-                            message: "Add your API keys once: Claude, Cloudflare, GitHub, anything. They go in your Mac's Keychain, and Claude Code can use them by name without ever seeing them. Website passwords too: KeyBar fills them into login pages for Claude. Already have keys in .env files? Find them.",
+                            message: "Add your API keys once: Claude, Cloudflare, GitHub, anything. They go in your Mac's Keychain, and Claude Code can use them by name without ever seeing them. Website passwords too: KeyBar signs in with them for Claude, which never sees them. Already have keys in .env files? Find them.",
                             fill: AppColors.butter) {
                     PillButton(title: "Find keys on this Mac", symbol: "magnifyingglass") { finding = true }
                     GhostButton(title: "Add a key", symbol: "plus") { showingAdd = true }

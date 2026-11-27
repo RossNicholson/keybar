@@ -5,8 +5,8 @@
 <h1 align="center">KeyBar</h1>
 
 <p align="center">
-  <strong>Your API keys in the Keychain, ready for Claude Code without it ever seeing them.</strong><br>
-  A free, open-source Mac menu bar app. Store a key once (Claude, Cloudflare, GitHub, Stripe, anything) and Claude Code uses it through KeyBar's MCP server: the key goes into one command as an environment variable, and any copy of it in the output is replaced with <code>[REDACTED]</code> before Claude sees it.
+  <strong>Your API keys and passwords in the Keychain, ready for Claude Code without it ever seeing them.</strong><br>
+  A free, open-source Mac menu bar app. Store a key once (Claude, Cloudflare, GitHub, Stripe, anything) and Claude Code uses it through KeyBar's MCP server: the key goes into one command as an environment variable, and any copy of it in the output is replaced with <code>[REDACTED]</code> before Claude sees it. Website passwords work the same way: KeyBar signs in with them for Claude, which never sees the username or password.
 </p>
 
 <p align="center">
