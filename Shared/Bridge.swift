@@ -63,8 +63,28 @@ enum Bridge {
     /// waits for a reply when there might be one (a little longer)
     static let approvalTimeout: TimeInterval = 170
     static let resolveTimeout: TimeInterval = 180
-    /// For `fill`: a Touch ID prompt, and finding and filling the field
-    static let fillTimeout: TimeInterval = 200
+    /// For `fill`: a Touch ID prompt, finding and filling the fields, and
+    /// waiting for the page to sign in
+    static let fillTimeout: TimeInterval = 230
+
+    /// The variables a website login is set as in a command: its username and
+    /// its password, e.g. LOGIN_LIVERPOOLFC_USERNAME and _PASSWORD
+    static func loginVariables(_ name: String) -> (username: String, password: String) {
+        (name + "_USERNAME", name + "_PASSWORD")
+    }
+
+    /// Every variable a `resolve` for these names may set: the names
+    /// themselves, and each one's login variables. The helper keeps only
+    /// these, so a reply can't set anything else (BASH_ENV, PATH…).
+    static func allowedVariables(for names: [String]) -> Set<String> {
+        var allowed = Set(names)
+        for name in names {
+            let login = loginVariables(name)
+            allowed.insert(login.username)
+            allowed.insert(login.password)
+        }
+        return allowed
+    }
 }
 
 /// What a stored item is. Saved only for passwords: an item without one (every
@@ -72,8 +92,9 @@ enum Bridge {
 enum SecretType: String, Codable, Sendable, CaseIterable {
     /// An API key or token: commands get it as an environment variable
     case apiKey
-    /// A website password: never given to commands, only filled into a login
-    /// page on one of its websites
+    /// A website login (username and password): filled into a login page on
+    /// one of its websites, and given to commands only if the user turns on
+    /// Settings → Logins in commands. Claude never sees either part.
     case password
 }
 
@@ -147,12 +168,15 @@ struct SecretSummary: Codable, Sendable, Equatable {
     /// Used through KeyBar's proxy: commands get a placeholder, and this
     /// variable (e.g. ANTHROPIC_BASE_URL) is the address to call instead
     var proxyVariable: String? = nil
-    /// A website password: filled into login pages with fill_password, never
-    /// given to commands
+    /// A website login: filled into login pages with fill_password
     var isPassword: Bool? = nil
-    /// A password's user name (not secret) and websites
-    var username: String? = nil
+    /// Whether the login has a username saved. The username itself is never
+    /// sent: Claude doesn't see it.
+    var hasUsername: Bool? = nil
     var websites: [String]? = nil
+    /// Commands can use the login (Settings → Logins in commands), as
+    /// $NAME_USERNAME and $NAME_PASSWORD
+    var inCommands: Bool? = nil
 }
 
 struct BridgeReply: Codable, Sendable {

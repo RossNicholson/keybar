@@ -18,7 +18,8 @@ enum SecretListing {
         }
         if !passwords.isEmpty {
             if !lines.isEmpty { lines.append("") }
-            lines.append("Website passwords (fill one into its login page with fill_password; they can't be used in commands):")
+            lines.append("Website logins (KeyBar signs in with them on their own websites through fill_password; you never see the "
+                + "username or password):")
             for secret in passwords { lines.append(passwordLine(secret)) }
         }
         if let message { lines.append("\n" + message) }
@@ -42,8 +43,16 @@ enum SecretListing {
 
     private static func passwordLine(_ secret: SecretSummary) -> String {
         let sites = secret.websites ?? []
-        var line = "- \(secret.name): password for \(sites.isEmpty ? "no website yet" : sites.joined(separator: ", "))"
-        if let username = secret.username, !username.isEmpty { line += ", username \(username)" }
+        var line = "- \(secret.name): login for \(sites.isEmpty ? "no website yet" : sites.joined(separator: ", "))"
+        line += secret.hasUsername == true ? " (username and password)" : " (password only, no username saved)"
+        if secret.inCommands == true {
+            let variables = Bridge.loginVariables(secret.name)
+            line += secret.hasUsername == true
+                ? "; in commands: $\(variables.username) and $\(variables.password)"
+                : "; in commands: $\(variables.password)"
+        } else {
+            line += "; browser only (the user hasn't allowed logins in commands)"
+        }
         if let group = secret.group, group != "Passwords" { line += " [\(group)]" }
         if let note = secret.note, !note.isEmpty { line += " (\(note))" }
         line += availability(secret)

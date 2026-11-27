@@ -290,6 +290,7 @@ final class PasswordPolicyTests: XCTestCase {
     var settings: AppSettings!
     var trusted = true
     var savedApproval: TimeInterval = 0
+    var savedLoginsInCommands = false
 
     override func setUp() async throws {
         store = SecretStore(vault: MemoryVault(), indexURL: nil)
@@ -297,13 +298,16 @@ final class PasswordPolicyTests: XCTestCase {
         settings = AppSettings()
         // The test host shares the app's defaults: put this back afterwards
         savedApproval = settings.approvalSeconds
+        savedLoginsInCommands = settings.loginsInCommands
         settings.approvalSeconds = 900
+        settings.loginsInCommands = false
         try store.add(name: "GITHUB_TOKEN", value: "ghp_secretvalue1234567")
         try store.add(name: "LOGIN_LIVERPOOLFC", value: "Kop-pass-word-99", login: ("ross@example.com", ["liverpoolfc.com"]))
     }
 
     override func tearDown() async throws {
         settings.approvalSeconds = savedApproval
+        settings.loginsInCommands = savedLoginsInCommands
     }
 
     func policy() -> BridgePolicy {
@@ -314,13 +318,14 @@ final class PasswordPolicyTests: XCTestCase {
         BridgeRequest(action: .fill, cwd: cwd, projectFolder: cwd, names: [name], site: site)
     }
 
-    func testRunWithSecretsRefusesPasswords() {
+    func testCommandsCantUseLoginsUnlessAllowed() {
         let policy = policy()
         let reply = policy.handle(BridgeRequest(action: .resolve, cwd: "/tmp", projectFolder: "/tmp",
                                                 names: ["LOGIN_LIVERPOOLFC", "GITHUB_TOKEN"], command: "curl -u ross:$LOGIN_LIVERPOOLFC x"))
         XCTAssertFalse(reply.ok)
         XCTAssertNil(reply.values, "no value of either goes back")
         XCTAssertTrue(reply.error?.contains("fill_password") == true, reply.error ?? "")
+        XCTAssertTrue(reply.error?.contains("Logins in commands") == true, reply.error ?? "")
         XCTAssertFalse(reply.error?.contains("Kop-pass-word-99") == true)
         XCTAssertEqual(log.entries.first?.action, .refused)
         XCTAssertNil(policy.approvalPrompt(for: BridgeRequest(action: .resolve, cwd: "/tmp", names: ["LOGIN_LIVERPOOLFC"], command: "x")),
@@ -332,8 +337,10 @@ final class PasswordPolicyTests: XCTestCase {
 
         let send = BridgeRequest(action: .send, cwd: "/tmp", names: ["LOGIN_LIVERPOOLFC"],
                                  destination: Destination(kind: .githubActions, target: "me/site", secretName: "PW"))
-        XCTAssertTrue(policy.sendProblem(send)?.contains("never sends passwords") == true)
+        XCTAssertTrue(policy.sendProblem(send)?.contains("never sends logins") == true)
         XCTAssertNil(policy.approvalPrompt(for: send))
+        settings.loginsInCommands = true
+        XCTAssertTrue(policy.sendProblem(send)?.contains("never sends logins") == true, "logins in commands never lets one leave the Mac")
 
         // A command with the password written into it is refused like a key's
         let literal = policy.handle(BridgeRequest(action: .resolve, cwd: "/tmp", names: ["GITHUB_TOKEN"], command: "echo Kop-pass-word-99"))
@@ -346,14 +353,60 @@ final class PasswordPolicyTests: XCTestCase {
         let result = await state.sendConfirmed("LOGIN_LIVERPOOLFC", to: Destination(kind: .githubActions, target: "me/site", secretName: "PW"),
                                                source: .you)
         guard case .failure(let error) = result else { return XCTFail("sent a password") }
-        XCTAssertTrue(error.localizedDescription.contains("never sends passwords"))
+        XCTAssertTrue(error.localizedDescription.contains("never sends logins"))
+    }
+
+    func testCommandsGetLoginsAsTwoHiddenVariablesOnceAllowed() throws {
+        settings.loginsInCommands = true
+        let policy = policy()
+        let request = BridgeRequest(action: .resolve, cwd: "/tmp", projectFolder: "/tmp", names: ["LOGIN_LIVERPOOLFC"],
+                                    command: "curl -u \"$LOGIN_LIVERPOOLFC_USERNAME:$LOGIN_LIVERPOOLFC_PASSWORD\" https://x")
+        let prompt = try XCTUnwrap(policy.approvalPrompt(for: request))
+        XCTAssertTrue(prompt.contains("LOGIN_LIVERPOOLFC (username and password)"), prompt)
+        let reply = policy.handle(request)
+        XCTAssertTrue(reply.ok, reply.error ?? "")
+        XCTAssertEqual(reply.values, ["LOGIN_LIVERPOOLFC_USERNAME": "ross@example.com", "LOGIN_LIVERPOOLFC_PASSWORD": "Kop-pass-word-99"],
+                       "never under its own name")
+        XCTAssertEqual(log.entries.first?.action, .ran)
+
+        // The helper keeps exactly these, nothing else a reply might add
+        let allowed = Bridge.allowedVariables(for: ["LOGIN_LIVERPOOLFC"])
+        XCTAssertEqual(allowed, ["LOGIN_LIVERPOOLFC", "LOGIN_LIVERPOOLFC_USERNAME", "LOGIN_LIVERPOOLFC_PASSWORD"])
+        XCTAssertFalse(allowed.contains("BASH_ENV"))
+        // Both are hidden in the output
+        let redactor = Redactor(secrets: Array(reply.values!.values))
+        let output = redactor.redact("user ross@example.com pass Kop-pass-word-99").text
+        XCTAssertFalse(output.contains("ross@example.com"))
+        XCTAssertFalse(output.contains("Kop-pass-word-99"))
+
+        // A password-only login gets just _PASSWORD
+        try store.add(name: "LOGIN_ROUTER", value: "router-pass-1", login: (nil, ["router.example.com"]))
+        let routerReply = policy.handle(BridgeRequest(action: .resolve, cwd: "/tmp", projectFolder: "/tmp", names: ["LOGIN_ROUTER"], command: "x"))
+        XCTAssertEqual(routerReply.values, ["LOGIN_ROUTER_PASSWORD": "router-pass-1"])
+
+        // A key named like a login's variable can't be asked for alongside it
+        try store.add(name: "LOGIN_LIVERPOOLFC_PASSWORD", value: "some-other-key-1234")
+        let clash = policy.handle(BridgeRequest(action: .resolve, cwd: "/tmp", projectFolder: "/tmp",
+                                                names: ["LOGIN_LIVERPOOLFC", "LOGIN_LIVERPOOLFC_PASSWORD"], command: "x"))
+        XCTAssertFalse(clash.ok)
+        XCTAssertNil(clash.values)
+
+        // keybar run can have it too, now it's allowed
+        var terminal = BridgeRequest(action: .resolve, cwd: "/tmp", client: Bridge.terminalClient, names: ["LOGIN_LIVERPOOLFC"], command: "x")
+        terminal.terminal = "/dev/ttys001"
+        XCTAssertTrue(policy.handle(terminal).ok)
+    }
+
+    func testLockedDownByDefault() {
+        XCTAssertEqual(AppSettings.defaultApprovalSeconds, -1, "Touch ID every time until the user loosens it")
+        XCTAssertEqual(AppSettings.approvalChoices.first, -1)
     }
 
     func testFillRefusals() throws {
         let policy = policy()
         XCTAssertNil(policy.fillProblem(fill("LOGIN_LIVERPOOLFC")))
-        XCTAssertTrue(policy.fillProblem(fill("GITHUB_TOKEN"))?.contains("API key, not a website password") == true)
-        XCTAssertTrue(policy.fillProblem(fill("NOPE"))?.contains("Stored passwords: LOGIN_LIVERPOOLFC") == true)
+        XCTAssertTrue(policy.fillProblem(fill("GITHUB_TOKEN"))?.contains("API key, not a website login") == true)
+        XCTAssertTrue(policy.fillProblem(fill("NOPE"))?.contains("Stored logins: LOGIN_LIVERPOOLFC") == true)
         XCTAssertNotNil(policy.fillProblem(BridgeRequest(action: .fill, cwd: "/tmp", names: ["LOGIN_LIVERPOOLFC", "GITHUB_TOKEN"])))
         // A site hint must be one of its websites
         XCTAssertNil(policy.fillProblem(fill("LOGIN_LIVERPOOLFC", site: "accounts.liverpoolfc.com")))
@@ -389,7 +442,7 @@ final class PasswordPolicyTests: XCTestCase {
         let policy = policy()
         let request = fill("LOGIN_LIVERPOOLFC")
         let prompt = try XCTUnwrap(policy.fillPrompt(request, site: "accounts.liverpoolfc.com", browser: "Safari"))
-        XCTAssertEqual(prompt, "let Claude Code fill your password for accounts.liverpoolfc.com in Safari (LOGIN_LIVERPOOLFC)")
+        XCTAssertEqual(prompt, "let Claude Code sign in to accounts.liverpoolfc.com in Safari with your login LOGIN_LIVERPOOLFC")
         policy.approvedFill(request, site: "accounts.liverpoolfc.com")
         XCTAssertNil(policy.fillPrompt(request, site: "accounts.liverpoolfc.com", browser: "Safari"), "one yes lasts, as for keys")
         XCTAssertNotNil(policy.fillPrompt(request, site: "liverpoolfc.com", browser: "Safari"), "but only for that site")
@@ -412,17 +465,21 @@ final class PasswordPolicyTests: XCTestCase {
         XCTAssertEqual(policy.websites(for: request), ["liverpoolfc.com"])
         guard case .success(let value) = policy.passwordValue(request) else { return XCTFail() }
         XCTAssertEqual(value, "Kop-pass-word-99")
+        XCTAssertTrue(policy.loginHasUsername(request))
+        XCTAssertEqual(policy.loginUsername(request), "ross@example.com")
+        XCTAssertNil(policy.loginUsername(fill("GITHUB_TOKEN")))
         guard case .failure = policy.passwordValue(fill("GITHUB_TOKEN")) else { return XCTFail("an API key's value for a fill") }
 
         XCTAssertNil(store.record("LOGIN_LIVERPOOLFC")?.lastUsedAt)
-        let done = policy.filled(request, site: "accounts.liverpoolfc.com", browser: "Safari")
+        let done = policy.filled(request, site: "accounts.liverpoolfc.com", browser: "Safari", outcome: .signedIn(usedUsername: true))
         XCTAssertTrue(done.ok)
         XCTAssertNil(done.values)
         XCTAssertTrue(done.message?.contains("accounts.liverpoolfc.com in Safari") == true)
+        XCTAssertFalse(done.message?.contains("ross@example.com") == true, "the username isn't told either")
         XCTAssertNotNil(store.record("LOGIN_LIVERPOOLFC")?.lastUsedAt)
         XCTAssertEqual(log.entries.first?.action, .filled)
         XCTAssertEqual(log.entries.first?.summary, "Filled")
-        XCTAssertEqual(log.entries.first?.detail, "accounts.liverpoolfc.com in Safari")
+        XCTAssertEqual(log.entries.first?.detail, "accounts.liverpoolfc.com in Safari: Signed in")
 
         var cursor = request
         cursor.client = "Cursor"
@@ -436,12 +493,44 @@ final class PasswordPolicyTests: XCTestCase {
         }
     }
 
+    func testTwoStepSignInAsksOnce() throws {
+        settings.approvalSeconds = -1
+        let policy = policy()
+        let request = fill("LOGIN_LIVERPOOLFC")
+        XCTAssertNotNil(policy.fillPrompt(request, site: "liverpoolfc.com", browser: "Safari"))
+        policy.approvedFill(request, site: "liverpoolfc.com")
+        _ = policy.filled(request, site: "liverpoolfc.com", browser: "Safari", outcome: .usernameSent)
+        XCTAssertNil(policy.fillPrompt(request, site: "liverpoolfc.com", browser: "Safari"), "the password page right after")
+        XCTAssertNotNil(policy.fillPrompt(request, site: "liverpoolfc.com", browser: "Safari"), "only once")
+        _ = policy.filled(request, site: "liverpoolfc.com", browser: "Safari", outcome: .usernameSent)
+        XCTAssertNotNil(policy.fillPrompt(request, site: "shop.liverpoolfc.com", browser: "Safari"), "only on that site")
+    }
+
+    func testFillOutcomesAndSearchBoxes() {
+        for outcome: FillOutcome in [.signedIn(usedUsername: true), .signedIn(usedUsername: false), .stillShowing(usedUsername: true), .usernameSent] {
+            let message = outcome.message(name: "LOGIN_X", host: "x.com", browser: "Chrome")
+            XCTAssertTrue(message.contains("x.com in Chrome"), message)
+            XCTAssertFalse(outcome.detail.isEmpty)
+        }
+        XCTAssertTrue(FillOutcome.usernameSent.message(name: "LOGIN_X", host: "x.com", browser: "Safari").contains("call fill_password again"))
+        XCTAssertTrue(FillOutcome.stillShowing(usedUsername: false).message(name: "LOGIN_X", host: "x.com", browser: "Safari").contains("emptied"))
+        XCTAssertTrue(UsernameField.looksLikeSearch(["site-Search", "nav"]))
+        XCTAssertTrue(UsernameField.looksLikeSearch(["Enter promo code"]))
+        XCTAssertFalse(UsernameField.looksLikeSearch(["username", "Email address", "login-form__field"]))
+        XCTAssertTrue(UsernameField.holds("me", username: "me"))
+        XCTAssertFalse(UsernameField.holds("me ", username: "me"))
+        XCTAssertFalse(UsernameField.holds(nil, username: "me"))
+    }
+
     func testListAndListing() throws {
         let reply = policy().handle(BridgeRequest(action: .list, cwd: "/tmp"))
         let password = try XCTUnwrap(reply.secrets?.first { $0.name == "LOGIN_LIVERPOOLFC" })
         XCTAssertEqual(password.isPassword, true)
-        XCTAssertEqual(password.username, "ross@example.com")
+        XCTAssertEqual(password.hasUsername, true)
+        XCTAssertNil(password.inCommands)
         XCTAssertEqual(password.websites, ["liverpoolfc.com"])
+        let encoded = String(decoding: try JSONEncoder().encode(reply), as: UTF8.self)
+        XCTAssertFalse(encoded.contains("ross@example.com"), "the username never goes to the helper")
         XCTAssertNil(reply.secrets?.first { $0.name == "GITHUB_TOKEN" }?.isPassword)
         XCTAssertNil(reply.values)
 
@@ -450,13 +539,20 @@ final class PasswordPolicyTests: XCTestCase {
         Keys stored in KeyBar (use them with run_with_secrets, as "$NAME"):
         - GITHUB_TOKEN: GitHub token
 
-        Website passwords (fill one into its login page with fill_password; they can't be used in commands):
-        - LOGIN_LIVERPOOLFC: password for liverpoolfc.com, username ross@example.com
+        Website logins (KeyBar signs in with them on their own websites through fill_password; you never see the username or password):
+        - LOGIN_LIVERPOOLFC: login for liverpoolfc.com (username and password); browser only (the user hasn't allowed logins in commands)
         """)
         XCTAssertFalse(text.contains("Kop-pass-word-99"))
+        XCTAssertFalse(text.contains("ross@example.com"))
         XCTAssertEqual(SecretListing.text([]), SecretListing.empty)
         let onlyPasswords = SecretListing.text([password])
-        XCTAssertTrue(onlyPasswords.hasPrefix("Website passwords"), onlyPasswords)
+        XCTAssertTrue(onlyPasswords.hasPrefix("Website logins"), onlyPasswords)
+
+        settings.loginsInCommands = true
+        let allowed = policy().handle(BridgeRequest(action: .list, cwd: "/tmp"))
+        let line = SecretListing.text(allowed.secrets ?? []).split(separator: "\n").last.map(String.init) ?? ""
+        XCTAssertEqual(line, "- LOGIN_LIVERPOOLFC: login for liverpoolfc.com (username and password); in commands: "
+            + "$LOGIN_LIVERPOOLFC_USERNAME and $LOGIN_LIVERPOOLFC_PASSWORD")
     }
 
     func testAskingForAPassword() throws {

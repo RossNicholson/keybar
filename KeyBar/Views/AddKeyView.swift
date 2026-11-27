@@ -106,7 +106,7 @@ struct AddKeyView: View {
             }
 
             if isPassword && !state.accessibilityTrusted {
-                SettingNote("To fill passwords, KeyBar needs Accessibility permission: Settings → Passwords.", isError: false)
+                SettingNote("To sign in with logins, KeyBar needs Accessibility permission: Settings → Logins.", isError: false)
             }
 
             if let error {

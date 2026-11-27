@@ -198,13 +198,13 @@ final class ClaudeConnector {
     static let reminderEnd = "<!-- KeyBar:end -->"
     static let reminder = """
     \(reminderStart)
-    ## API keys and passwords (KeyBar)
+    ## API keys and logins (KeyBar)
     My API keys and tokens are stored in KeyBar. Before asking me to paste a key, or reading one from a .env file, \
     call the `list_secrets` tool of the `keybar` MCP server. Run commands that need a key with `run_with_secrets`, \
     referring to the key as `$NAME`. Never print, echo or save a key's value.
-    My website passwords are in KeyBar too. To log in to a site, open its login page, type the username yourself, \
-    focus the password field and call `fill_password`, then submit the form. Never ask me to type a password into \
-    the chat; if one isn't stored, call `request_secret` with type `password` and the website.
+    My website logins are in KeyBar too. To sign in to a site, open its login page and call `fill_password`: KeyBar \
+    types the username and password and signs in. Don't type the username yourself. Never ask me to type a password \
+    into the chat; if one isn't stored, call `request_secret` with type `password` and the website.
     \(reminderEnd)
     """
 

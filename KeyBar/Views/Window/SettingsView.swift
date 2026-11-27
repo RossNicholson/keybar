@@ -21,11 +21,14 @@ struct SettingsView: View {
                 }
             })
 
-            SettingCard(title: "Ask before Claude uses a key",
-                        detail: "Touch ID before Claude Code (or any app using KeyBar's MCP server) runs a command with one of your keys. The prompt shows the command. With a time, one yes covers the same keys from the same project until it's up.",
+            SettingCard(title: "Ask before Claude uses a key or login",
+                        detail: "Touch ID before Claude Code (or any app using KeyBar's MCP server) runs a command with one of your keys, or signs in with one of your logins. The prompt shows the command or the website. With a time, one yes covers the same keys from the same project until it's up.",
                         below: {
                 PillPicker(selection: $settings.approvalSeconds, options: AppSettings.approvalChoices, track: AppColors.ground) {
                     AppSettings.approvalLabel($0)
+                }
+                if settings.approvalSeconds == 0 {
+                    SettingNote("Claude can use every key and login without asking you. A key or login set to ask \"Every time\" (Keys → edit) still asks.", isError: false)
                 }
             })
 
@@ -33,8 +36,11 @@ struct SettingsView: View {
                           detail: "A notification two weeks before a key's expiry date, and on the day. Set the date when you add or edit a key; Test fills it in for GitHub and Cloudflare tokens.",
                           isOn: $settings.expiryReminders)
 
-            SectionLabel(text: "Passwords")
+            SectionLabel(text: "Logins")
             AccessibilityCard()
+            SettingToggle(title: "Logins in commands",
+                          detail: "Off, a login is only ever typed into its own website's sign-in page. On, Claude can also use one in a command, as $NAME_USERNAME and $NAME_PASSWORD (for a script, a database or an email server, say), still without seeing either: they're hidden in the output like keys.",
+                          isOn: $settings.loginsInCommands)
 
             SectionLabel(text: "Your other Macs")
             SettingToggle(title: "Sync with iCloud Keychain",
@@ -128,8 +134,8 @@ private struct AccessibilityCard: View {
 
     var body: some View {
         let trusted = state.accessibilityTrusted
-        SettingCard(title: "Fill passwords in the browser",
-                    detail: "Claude asks with fill_password, and KeyBar types the password into the login page itself, so Claude never sees it. Only https pages on the password's websites, in Safari and Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi), not Firefox. macOS needs you to allow KeyBar under Accessibility for this.",
+        SettingCard(title: "Sign in on websites",
+                    detail: "Claude asks with fill_password, and KeyBar types the username and password into the sign-in page itself and presses Return, so Claude sees neither. Only https pages on the login's websites, in Safari and Chromium browsers (Chrome, Arc, Brave, Edge, Vivaldi), not Firefox. If the page still shows the password a few seconds later, KeyBar empties the box. macOS needs you to allow KeyBar under Accessibility for this.",
                     trailing: {
             if trusted {
                 TagPill(text: "Allowed", fill: AppColors.mint)
@@ -142,7 +148,9 @@ private struct AccessibilityCard: View {
             }
         }, below: {
             if !trusted {
-                SettingNote("Not allowed yet. Turn on KeyBar in System Settings → Privacy & Security → Accessibility. Until then fill_password tells Claude it can't fill.", isError: false)
+                SettingNote("Not allowed yet. Turn on KeyBar in System Settings → Privacy & Security → Accessibility. If KeyBar isn't in the list, quit KeyBar, open it again and click Allow… once more. Until then fill_password tells Claude it can't sign in.", isError: false)
+            } else {
+                SettingNote("While a sign-in page holds your password (a moment, until it's sent), anything that can run scripts in the browser could read it, such as Safari's Develop → Allow JavaScript from Apple Events or a browser extension Claude controls. Leave those off if you don't need them.", isError: false)
             }
         })
         .task {

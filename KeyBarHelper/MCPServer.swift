@@ -255,6 +255,8 @@ final class MCPServer: @unchecked Sendable {
 
         let client = clientName
         let wanted = Set(names)
+        // A login comes back as NAME_USERNAME and NAME_PASSWORD
+        let allowed = Bridge.allowedVariables(for: names)
         let reply: BridgeReply
         do {
             // Long enough for the user to answer a Touch ID prompt
@@ -265,9 +267,9 @@ final class MCPServer: @unchecked Sendable {
             return toolError("\(error)")
         }
         guard reply.ok, let reported = reply.values else { return toolError(reply.error ?? "KeyBar refused.") }
-        // Only the keys asked for: nothing else gets into the environment
-        // (BASH_ENV, PATH…), whatever the reply says
-        let values = reported.filter { wanted.contains($0.key) }
+        // Only the keys asked for (and their login variables): nothing else
+        // gets into the environment (BASH_ENV, PATH…), whatever the reply says
+        let values = reported.filter { allowed.contains($0.key) }
         let fileNames = reply.files ?? [:]
         let keyFiles: KeyFiles
         do {

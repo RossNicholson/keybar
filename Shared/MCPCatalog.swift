@@ -19,11 +19,13 @@ enum MCPCatalog {
     "$ANTHROPIC_BASE_URL/v1/messages" instead of the service's own address. A project's .keybar file lists the \
     keys it uses; others are hidden there. If a commit is stopped by KeyBar's commit guard, a stored key's value \
     is in the changes: replace it with a reference to the environment variable, never commit it. \
-    KeyBar also keeps website passwords, listed in their own section by list_secrets with their websites and \
-    username. A password is never given to you or to commands, and run_with_secrets refuses one. To log in to a \
-    site: open its login page in the browser, type the username yourself, focus the password field, call \
-    fill_password with the password's name (KeyBar types it into that field and says which site and browser it \
-    filled), then submit the form. KeyBar only fills https pages on the password's websites or their subdomains. \
+    KeyBar also keeps website logins (a username and password), listed in their own section by list_secrets with \
+    their websites. You never see a login's username or password. To sign in to a site: open its login page in the \
+    browser and call fill_password with the login's name: KeyBar types the username and password into the page \
+    and presses Return to sign in, then tells you what happened. Don't type the username yourself. If the site \
+    asks for the username on one page and the password on the next, call fill_password on each page. KeyBar only \
+    fills https pages on the login's websites or their subdomains. If the user has turned on logins in commands \
+    (list_secrets says so), run_with_secrets can use a login too: it's set as $NAME_USERNAME and $NAME_PASSWORD. \
     Never ask the user to type or paste a password into the chat; if one isn't stored, call request_secret with \
     type "password" and the website.
     """
@@ -34,8 +36,8 @@ enum MCPCatalog {
             "title": "List stored keys and passwords",
             "description": """
             Lists the API keys and tokens stored in KeyBar: each one's name (also the environment variable it's \
-            set as), the service it's for and what kind of credential it is. Website passwords are listed in their \
-            own section, with their websites and username, for fill_password. Values are never shown. Call this \
+            set as), the service it's for and what kind of credential it is. Website logins are listed in their \
+            own section, with their websites, for fill_password. Values and usernames are never shown. Call this \
             before asking the user for a key or a password.
             """,
             "inputSchema": ["type": "object", "properties": [String: Any](), "additionalProperties": false],
@@ -50,7 +52,8 @@ enum MCPCatalog {
             https://api.cloudflare.com/client/v4/user/tokens/verify". Refer to keys only as "$NAME"; a command \
             containing a key's actual value is refused. Returns the exit code, stdout and stderr, with any copy \
             of a key replaced by [REDACTED]. Runs in the project folder unless cwd is given. Keys may be limited \
-            to certain project folders. Website passwords can't be used here: use fill_password.
+            to certain project folders. A website login can be used only if the user allowed logins in commands \
+            (list_secrets says so): it's set as $NAME_USERNAME and $NAME_PASSWORD, never shown to you.
             """,
             "inputSchema": [
                 "type": "object",
@@ -73,19 +76,20 @@ enum MCPCatalog {
         ],
         [
             "name": "fill_password",
-            "title": "Fill a website password",
+            "title": "Sign in with a website login",
             "description": """
-            Types a stored website password into the password field of the login page open in Safari or a \
-            Chromium browser (Chrome, Arc, Brave, Edge, Vivaldi). First open the login page, type the username \
-            yourself and focus (click) the password field; then call this, then submit the form. KeyBar only fills \
-            https pages on the password's websites (or their subdomains), may ask the user with Touch ID, and \
-            replies with the site and browser it filled. You never see the password. If a site asks for the \
-            username on one page and the password on the next, go to the password step first.
+            Signs in on the login page open in Safari or a Chromium browser (Chrome, Arc, Brave, Edge, Vivaldi): \
+            KeyBar types the stored username and password into the page itself and presses Return. First open \
+            the login page; don't type the username yourself. If the site asks for the username on one page and \
+            the password on the next, call this on each page. KeyBar only fills https pages on the login's \
+            websites (or their subdomains), may ask the user with Touch ID, and replies with what it did and \
+            whether the page moved on. You never see the username or password. If a page has several login \
+            forms, click into the right one first.
             """,
             "inputSchema": [
                 "type": "object",
                 "properties": [
-                    "name": ["type": "string", "description": "The stored password's name (see list_secrets), e.g. LOGIN_LIVERPOOLFC."],
+                    "name": ["type": "string", "description": "The stored login's name (see list_secrets), e.g. LOGIN_LIVERPOOLFC."],
                     "site": [
                         "type": "string",
                         "description": "Optional: the site to fill, when the password has several websites open at once, e.g. accounts.liverpoolfc.com.",
@@ -103,7 +107,7 @@ enum MCPCatalog {
             Asks the user to add a key or website password KeyBar doesn't have yet: KeyBar opens its Add window \
             with the details filled in and your reason shown, and the user pastes (or makes up) the value there. \
             Waits up to 5 minutes for them. You never see the value; once it's added, use a key with \
-            run_with_secrets and a password with fill_password. For a key, give its name. For a password, give \
+            run_with_secrets and a login with fill_password. For a key, give its name. For a password, give \
             type "password" and the website (and the username if you know it); the name is optional. Use this \
             instead of asking the user to paste a key or password into the chat.
             """,
@@ -128,7 +132,7 @@ enum MCPCatalog {
             Sends one stored key to a GitHub repository's Actions secrets (with gh), or a Cloudflare Worker's or \
             Pages project's secrets (with wrangler), so a deploy can use it. KeyBar asks the user with Touch ID \
             every time and sends it itself; the value never passes through you. Replaces a secret of the same name \
-            there. Website passwords are never sent.
+            there. Website logins are never sent.
             """,
             "inputSchema": [
                 "type": "object",

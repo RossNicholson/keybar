@@ -249,7 +249,7 @@ final class AppState {
                        client: String? = nil) async -> Result<String, Error> {
         // Passwords never leave the Mac
         guard store.record(name)?.isPassword != true else {
-            return .failure(Sender.Failure.failed("\(name) is a website password. KeyBar never sends passwords anywhere."))
+            return .failure(Sender.Failure.failed("\(name) is a website login. KeyBar never sends logins anywhere."))
         }
         let value: String
         do {
@@ -591,11 +591,21 @@ final class AppSettings {
     static let clipboardChoices: [TimeInterval] = [20, 60, 120]
 
     /// Whether to ask with Touch ID before Claude Code (or another app) uses a
-    /// key: 0 never, -1 every time, otherwise once per this many seconds for
-    /// the same keys from the same project. On (15 minutes) by default: any
-    /// program running as this user could start KeyBar's helper.
-    var approvalSeconds: TimeInterval = UserDefaults.standard.object(forKey: "approvalSeconds") as? Double ?? 900 {
+    /// key or login: 0 never, -1 every time, otherwise once per this many
+    /// seconds for the same keys from the same project. Every time by default:
+    /// KeyBar starts locked down and the user loosens it (any program running
+    /// as this user could start KeyBar's helper).
+    var approvalSeconds: TimeInterval = UserDefaults.standard.object(forKey: "approvalSeconds") as? Double ?? AppSettings.defaultApprovalSeconds {
         didSet { UserDefaults.standard.set(approvalSeconds, forKey: "approvalSeconds") }
+    }
+
+    static let defaultApprovalSeconds: TimeInterval = -1
+
+    /// Whether commands may use website logins, as $NAME_USERNAME and
+    /// $NAME_PASSWORD. Off by default: a login is then only ever filled into
+    /// its own website's login page.
+    var loginsInCommands: Bool = UserDefaults.standard.object(forKey: "loginsInCommands") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(loginsInCommands, forKey: "loginsInCommands") }
     }
 
     /// A dot on the menu bar icon while Claude Code isn't connected

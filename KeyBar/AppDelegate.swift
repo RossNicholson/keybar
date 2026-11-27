@@ -266,9 +266,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let problem = DispatchQueue.main.sync(execute: { MainActor.assumeIsolated { policy.fillProblem(request) } }) {
             return DispatchQueue.main.sync { MainActor.assumeIsolated { policy.refuseFill(request, problem) } }
         }
-        let websites = DispatchQueue.main.sync { MainActor.assumeIsolated { policy.websites(for: request) } }
+        let (websites, hasUsername) = DispatchQueue.main.sync { MainActor.assumeIsolated {
+            (policy.websites(for: request), policy.loginHasUsername(request))
+        } }
         let target: FillTarget
-        switch filler.locate(websites: websites, site: request.site) {
+        switch filler.locate(websites: websites, site: request.site, wantsUsername: hasUsername) {
         case .success(let found):
             target = found
         case .failure(let problem):
@@ -301,11 +303,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .failure(let problem):
             return DispatchQueue.main.sync { MainActor.assumeIsolated { policy.refuseFill(request, problem.message) } }
         }
-        let result = filler.fill(target, password: password, websites: websites)
+        let username = DispatchQueue.main.sync { MainActor.assumeIsolated { policy.loginUsername(request) } }
+        let result = filler.fill(target, username: username, password: password, websites: websites)
         return DispatchQueue.main.sync {
             MainActor.assumeIsolated {
                 switch result {
-                case .success: return policy.filled(request, site: target.host, browser: target.browser)
+                case .success(let outcome): return policy.filled(request, site: target.host, browser: target.browser, outcome: outcome)
                 case .failure(let problem):
                     return policy.refuseFill(request, problem.message, site: target.host, browser: target.browser)
                 }
