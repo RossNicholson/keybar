@@ -46,6 +46,23 @@ with them set → redacts output (plain, base64 variants, URL-encoded, hex, reve
 - Don't connect Ross's real Claude Code from a dev build: it would register the build/dd path.
 
 ## Where we left off (2026-11-11)
+- **2026-11-27: logins reworked on branch `passwords`, tested on screen with Ross, waiting to release as 1.5.0.**
+  Ross's rules: usernames and passwords work like keys and Claude never sees either; KeyBar starts locked down
+  and the user opens it up. So: list_secrets never sends usernames (SecretSummary has hasUsername/inCommands,
+  no username); fill_password types the username (nearest text field before the password field in the same
+  frame, not search-like) and the password, presses Return, and empties the password box if it still holds
+  text 6 s later (`FillOutcome`); username-only pages are a `.username` step, and the password step that
+  follows within 2 min needs no second Touch ID (`secondSteps`). Settings → Logins in commands (default off):
+  resolve gives NAME_USERNAME / NAME_PASSWORD, never NAME (`Bridge.loginVariables`, helper keeps only
+  `Bridge.allowedVariables`), keybar run maps VARIABLE_USERNAME/_PASSWORD; logins are never sent. Touch ID
+  default is now Every time (`AppSettings.defaultApprovalSeconds`); Ross's own setting is 15 min. Settings
+  cog added to the panel (opens the window on Settings, like Mop Up). Ross saw on 27 Nov, with a signed dev
+  build: approve + cancel prompts, a full sign-in on the herokuapp demo with nothing typed by "Claude", and a
+  command using the login with both values [REDACTED] that still signed in. Not tried yet: a real two-step
+  site (Google/Microsoft) and Chrome with the new flow. Gotcha: the Accessibility (TCC) entry from 20 Nov was
+  pinned to that build's cdhash, so a rebuilt dev copy wasn't trusted though the switch was on; `tccutil reset
+  Accessibility com.rossnicholson.KeyBar` and Allow… in a freshly launched copy gave a team-based entry that
+  survives rebuilds. macOS only shows its Accessibility prompt once per launch.
 - **2026-11-20: website passwords, on branch `passwords`. NOT merged or released, no version bump.**
   A record's `type` (nil = API key), `username` and `websites` are in the index and SyncedDetails (an older
   KeyBar's details can't turn a password back into a key). Add form has API key / Password; editor,

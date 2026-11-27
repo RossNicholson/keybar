@@ -67,11 +67,11 @@ claude mcp add --scope user keybar -- /Applications/KeyBar.app/Contents/Helpers/
 
 | Tool | What it does |
 |---|---|
-| `list_secrets` | The stored keys' names, services and kinds (e.g. `CLOUDFLARE_API_TOKEN: Cloudflare API token`), and which are files or expire soon, then the website passwords with their websites and username. Never values. |
+| `list_secrets` | The stored keys' names, services and kinds (e.g. `CLOUDFLARE_API_TOKEN: Cloudflare API token`), and which are files or expire soon, then the website logins with their websites. Never values or usernames. |
 | `run_with_secrets` | Runs a shell command with the named keys set as environment variables. Returns the exit code, stdout and stderr, with every copy of a key replaced by `[REDACTED]`. |
-| `fill_password` | Types a stored website password into the login page open in your browser. See [Website passwords](#website-passwords). |
-| `request_secret` | Asks you for a key or website password KeyBar doesn't have. KeyBar opens *Add key* with the name (or the website and username) filled in and Claude's reason above it. You paste it; Claude only hears that it's stored. |
-| `send_secret` | Sends a stored key to a GitHub repo's Actions secrets, or a Cloudflare Worker or Pages project, so a deploy can use it. Always asks with Touch ID, whatever *Ask before Claude uses a key* is set to. |
+| `fill_password` | Signs in with a stored website login on the page open in your browser: KeyBar types the username and password and presses Return. See [Website logins](#website-logins). |
+| `request_secret` | Asks you for a key or website login KeyBar doesn't have. KeyBar opens *Add key* with the name (or the website and username) filled in and Claude's reason above it. You paste it; Claude only hears that it's stored. |
+| `send_secret` | Sends a stored key to a GitHub repo's Actions secrets, or a Cloudflare Worker or Pages project, so a deploy can use it. Always asks with Touch ID, whatever *Ask before Claude uses a key or login* is set to. |
 
 ### Other AI apps
 
@@ -154,27 +154,32 @@ KeyBar stopped this commit: it contains the value of a stored key.
 
 It works by pointing git's global `core.hooksPath` at `~/.keybar/hooks`. Each hook there runs the repo's own hook (`.git/hooks/…`) as well, so nothing you had stops working. If you already use a global hooks folder, KeyBar leaves it alone and gives you the line to add to your own `pre-commit`. A repo with its own `core.hooksPath` (Husky, say) isn't checked. Skip it once with `git commit --no-verify`. If KeyBar isn't running, commits go ahead with a warning.
 
-## Website passwords
+## Website logins
 
-KeyBar can keep website passwords too, so Claude can log in to a site for you (in a browser it's driving, or one you have open) without ever seeing the password.
+KeyBar can keep website logins too (a username and a password), so Claude can sign in to a site for you (in a browser it's driving, or one you have open) without ever seeing either.
 
-In *Add key*, choose **Password**. Give the website (a domain like `liverpoolfc.com`, or paste the login page's address), the username and the password, or click **Generate** for a strong new one. You can add more than one website. KeyBar suggests a name like `LOGIN_LIVERPOOLFC`. Passwords are listed under *Passwords* with the site and username.
+In *Add key*, choose **Password**. Give the website (a domain like `liverpoolfc.com`, or paste the login page's address), the username and the password, or click **Generate** for a strong new one. You can add more than one website. KeyBar suggests a name like `LOGIN_LIVERPOOLFC`.
 
-When Claude needs to log in, it opens the login page, types the username itself, clicks into the password field and calls `fill_password`. KeyBar checks the page, asks with Touch ID (naming the site and the browser) and types the password into that field. Claude only hears which site and browser it filled, then submits the form.
+**Signing in on a website.** Claude opens the login page and calls `fill_password`. KeyBar checks the page, asks with Touch ID (naming the site and the browser), types the username and the password into the page itself and presses Return. Claude only hears whether the page moved on. If a site asks for the username on one page and the password on the next, Claude calls it on each page, and one Touch ID covers both.
+
+**Logins in commands.** Off by default. Turn on **Settings → Logins in commands** and Claude can also use a login in a command (for a script, a database or an email server), set as `$LOGIN_LIVERPOOLFC_USERNAME` and `$LOGIN_LIVERPOOLFC_PASSWORD`. Both are hidden in the output like keys, and the Touch ID prompt shows the command.
 
 **The rules, enforced by the app:**
 
-- A password is only filled into a page served over **https** whose host is one of its websites or a subdomain of one. `accounts.liverpoolfc.com` is fine for `liverpoolfc.com`; `liverpoolfc.com.evil.io`, `evilliverpoolfc.com` and `http://liverpoolfc.com` are not. A login form in a frame must have every frame around it on the password's websites too.
-- It goes into a password field only: the focused one, or the only one on the page. With several and none focused, nothing is filled. The window has to be the browser's front window.
-- After typing, KeyBar checks the field holds the whole password and clears it if not.
-- The value never leaves the app: it isn't in any reply to Claude, the activity log or an error. `run_with_secrets`, `keybar run` and *Send* refuse passwords, so a command can't send one anywhere.
-- Touch ID, folder limits, `.keybar` lists and archiving work as they do for keys. Each fill and each refusal goes in the activity log with the app that asked and the site.
+- Claude never sees a login's username or password: `list_secrets` shows only its name and websites.
+- A login is only filled into a page served over **https** whose host is one of its websites or a subdomain of one. `accounts.liverpoolfc.com` is fine for `liverpoolfc.com`; `liverpoolfc.com.evil.io`, `evilliverpoolfc.com` and `http://liverpoolfc.com` are not. A login form in a frame must have every frame around it on the login's websites too.
+- The password goes into a password field only: the focused one, or the only one on the page. With several and none focused, nothing is filled. The username goes into the text field just above it (never one that looks like a search box). The window has to be the browser's front window.
+- After typing, KeyBar checks each field holds exactly what it typed, and clears the password if not. It presses Return straight away, and if the page still shows the filled password box six seconds later, it empties it, so the password sits in the page for as short a time as possible.
+- The values never leave the app except into the page, or into a command once you've allowed that: they aren't in any reply to Claude, the activity log or an error. *Send* never sends a login.
+- Touch ID, folder limits, `.keybar` lists and archiving work as they do for keys. Each sign-in and each refusal goes in the activity log with the app that asked and the site.
+
+**One limit.** While a sign-in page holds the password (a moment, until it's sent), anything that can run scripts in that browser tab could read it: Safari's *Develop → Allow JavaScript from Apple Events*, or a browser extension Claude controls. Leave those off if you don't need them. This is the same for every password manager that fills web pages.
 
 **Browsers.** Safari (and Safari Technology Preview) and Chromium browsers: Chrome, Arc, Brave, Edge, Vivaldi and Chromium. Firefox isn't supported. In a Chromium browser the first fill can take a couple of seconds while the browser turns on the page's accessibility details; KeyBar turns them off again afterwards.
 
-**Permission.** Filling uses macOS Accessibility, so KeyBar needs to be allowed in System Settings → Privacy & Security → Accessibility. **Settings → Passwords** shows whether it is and has a button to ask. Until then `fill_password` tells Claude it can't fill.
+**Permission.** Filling uses macOS Accessibility, so KeyBar needs to be allowed in System Settings → Privacy & Security → Accessibility. **Settings → Logins** shows whether it is and has a button to ask. If KeyBar doesn't appear in the list, quit KeyBar, open it again and click the button once more. Until then `fill_password` tells Claude it can't sign in.
 
-With iCloud sync, passwords sync like keys. Update KeyBar on all your Macs first: an older version shows a password as a key.
+With iCloud sync, logins sync like keys. Update KeyBar on all your Macs first: an older version shows a login as a key.
 
 ## Send keys to GitHub and Cloudflare
 
@@ -225,13 +230,13 @@ Sync needs KeyBar's provisioning profile, which only the builds from Homebrew an
 - **Activity log.** Every use, with the key, the program it ran, the folder, the exit code and whether anything was hidden, labelled *By Claude Code* or *By you*. Never values.
 - **Folder limits.** Lock a key to the project folders that need it; a command run anywhere else is refused.
 - **Refuses pasted keys.** A command with a key's actual value written into it is refused, so values don't end up in Claude's transcript.
-- **Touch ID for Claude, too.** Before Claude Code uses a key, KeyBar asks with Touch ID and shows the command it wants to run. By default one yes covers the same keys from the same project for 15 minutes; choose every time, an hour or never in Settings.
+- **Touch ID for Claude, too.** Before Claude Code uses a key or a login, KeyBar asks with Touch ID and shows the command it wants to run (or the site it wants to sign in to). By default it asks every time; in Settings you can let one yes cover the same keys from the same project for 15 minutes or an hour, or turn it off.
 - **Touch ID rules per key.** Edit a key to set *Every time* for the ones that matter most (a live Stripe key, say), or *Don't ask* for harmless ones, whatever Settings says. `keybar run` asks every time.
 - **Knows 468 services.** CLOUDFLARE_API_TOKEN is recognised as Cloudflare's API token, STRIPE_PUBLISHABLE_KEY as Stripe's publishable key. The list is built in, so recognising one never touches the network.
 - **Recognises pasted keys.** Paste `sk-ant-…`, `ghp_…`, `sk_live_…` and dozens more and the name is filled in for you. Paste a whole `NAME=value` line and both fields fill.
 - **Imports .env files.** Pick which lines to bring in, then delete the file. Or let [Find keys](#find-keys-on-this-mac) find them all.
 - **Groups, order and notes.** Group keys by project (or leave them under their service), rename or ungroup a group, and put keys in your own order from the right-click menu. Search by name, service, website, group or note.
-- **Website passwords.** Claude logs in to sites with `fill_password` and never sees the password. See [Website passwords](#website-passwords).
+- **Website logins.** Claude signs in to sites with `fill_password` and never sees the username or password; commands can use them too once you allow it. See [Website logins](#website-logins).
 - **Archive.** File away a key you're not using: it stays in the Keychain but Claude can't see or use it until you restore it.
 - **Menu bar dot.** A coral dot on the key while Claude Code isn't connected (you can turn it off).
 - **Delete, even when stuck.** If the Keychain won't delete an item, KeyBar can take it off its list and leave it for Keychain Access.
