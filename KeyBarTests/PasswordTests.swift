@@ -449,14 +449,14 @@ final class PasswordPolicyTests: XCTestCase {
         XCTAssertNotNil(policy.approvalPrompt(for: BridgeRequest(action: .resolve, cwd: "/tmp", projectFolder: "/tmp",
                                                                  names: ["GITHUB_TOKEN"], command: "gh api user")))
 
-        // The password's own rule wins, as for keys
+        // Logins have no rule of their own: one left from 1.5.0 is ignored
         var record = try XCTUnwrap(store.record("LOGIN_LIVERPOOLFC"))
-        record.approval = .everyTime
-        store.update(record)
-        XCTAssertNotNil(policy.fillPrompt(request, site: "accounts.liverpoolfc.com", browser: "Safari"))
         record.approval = .never
         store.update(record)
-        XCTAssertNil(policy.fillPrompt(request, site: "accounts.liverpoolfc.com", browser: "Safari"))
+        XCTAssertNotNil(policy.fillPrompt(request, site: "liverpoolfc.com", browser: "Safari"), "follows Settings, not its own rule")
+        record.approval = .everyTime
+        store.update(record)
+        XCTAssertNil(policy.fillPrompt(request, site: "accounts.liverpoolfc.com", browser: "Safari"), "the recent yes still counts")
         settings.approvalSeconds = 0
         record.approval = nil
         store.update(record)

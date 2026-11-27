@@ -231,7 +231,7 @@ Sync needs KeyBar's provisioning profile, which only the builds from Homebrew an
 - **Folder limits.** Lock a key to the project folders that need it; a command run anywhere else is refused.
 - **Refuses pasted keys.** A command with a key's actual value written into it is refused, so values don't end up in Claude's transcript.
 - **Touch ID for Claude, too.** Before Claude Code uses a key or a login, KeyBar asks with Touch ID and shows the command it wants to run (or the site it wants to sign in to). By default it asks every time; in Settings you can let one yes cover the same keys from the same project for 15 minutes or an hour, or turn it off.
-- **Touch ID rules per key.** Edit a key to set *Every time* for the ones that matter most (a live Stripe key, say), or *Don't ask* for harmless ones, whatever Settings says. `keybar run` asks every time.
+- **Touch ID rules per key.** Edit a key to set *Every time* for the ones that matter most (a live Stripe key, say), or *Don't ask* for harmless ones, whatever Settings says. Logins always follow Settings. `keybar run` asks every time.
 - **Knows 468 services.** CLOUDFLARE_API_TOKEN is recognised as Cloudflare's API token, STRIPE_PUBLISHABLE_KEY as Stripe's publishable key. The list is built in, so recognising one never touches the network.
 - **Recognises pasted keys.** Paste `sk-ant-…`, `ghp_…`, `sk_live_…` and dozens more and the name is filled in for you. Paste a whole `NAME=value` line and both fields fill.
 - **Imports .env files.** Pick which lines to bring in, then delete the file. Or let [Find keys](#find-keys-on-this-mac) find them all.

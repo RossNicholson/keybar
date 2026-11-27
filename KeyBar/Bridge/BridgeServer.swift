@@ -202,6 +202,14 @@ final class BridgePolicy {
     /// What to ask with Touch ID before this request may go ahead, or nil if
     /// it needn't ask (it's not a use, it'll be refused anyway, approval is
     /// off, or the user approved the same use recently enough)
+    /// The requested keys' own Touch ID rules. Logins have none: they
+    /// always follow Settings.
+    private func keyRules(_ request: BridgeRequest) -> [KeyApproval] {
+        (request.names ?? []).compactMap { name in
+            store.record(name).flatMap { $0.isPassword ? nil : $0.approval }
+        }
+    }
+
     func approvalPrompt(for request: BridgeRequest) -> String? {
         if request.action == .send {
             // Always asks: the key leaves the Mac
@@ -212,7 +220,7 @@ final class BridgePolicy {
         }
         guard request.action == .resolve, let settings, problem(with: request) == nil else { return nil }
         let seconds = Self.approvalSeconds(for: request, setting: settings.approvalSeconds,
-                                           keys: (request.names ?? []).compactMap { store.record($0)?.approval })
+                                           keys: keyRules(request))
         guard seconds != 0 else { return nil }
         if seconds > 0, let approved = approvals[Self.approvalScope(request)],
            Date().timeIntervalSince(approved) < seconds {
@@ -520,12 +528,12 @@ final class BridgePolicy {
     }
 
     /// What to ask with Touch ID before filling into this page, or nil if
-    /// the rules say not to ask (as for keys: Settings, the password's own
-    /// rule, a recent yes for the same password on the same site)
+    /// the rules say not to ask (Settings, or a recent yes for the same login
+    /// on the same site)
     func fillPrompt(_ request: BridgeRequest, site: String, browser: String) -> String? {
         guard let settings, fillProblem(request) == nil else { return nil }
         let seconds = Self.approvalSeconds(for: request, setting: settings.approvalSeconds,
-                                           keys: (request.names ?? []).compactMap { store.record($0)?.approval })
+                                           keys: keyRules(request))
         guard seconds != 0 else { return nil }
         let scope = Self.approvalScope(request, site: site)
         // The password page of a sign-in whose username page was just approved

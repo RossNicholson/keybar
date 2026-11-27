@@ -333,13 +333,15 @@ struct KeyEditor: View {
                 GhostButton(title: "Limit to a folder…", symbol: "folder.badge.plus") { chooseFolder() }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                FieldLabel(text: "Touch ID", detail: record.isPassword ? "before Claude has it filled in" : "before a command uses it")
-                PillPicker(selection: $approval, options: ApprovalChoice.allCases, track: AppColors.surface) { $0.title }
-                if approval == .never {
-                    Text("Claude and other apps can use it without asking you. Only for keys that don't matter if they leak.")
-                        .font(.mono(9.5))
-                        .foregroundStyle(AppColors.secondaryText)
+            if !record.isPassword {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel(text: "Touch ID", detail: "before a command uses it")
+                    PillPicker(selection: $approval, options: ApprovalChoice.allCases, track: AppColors.surface) { $0.title }
+                    if approval == .never {
+                        Text("Claude and other apps can use it without asking you. Only for keys that don't matter if they leak.")
+                            .font(.mono(9.5))
+                            .foregroundStyle(AppColors.secondaryText)
+                    }
                 }
             }
             if KeyProxy.route(for: record) != nil {
@@ -572,7 +574,8 @@ struct KeyEditor: View {
                 try state.replaceValue(current, with: newValue.trimmingCharacters(in: .whitespacesAndNewlines))
             }
             if !record.isPassword { state.setExpiry(current, expires ? expiresAt : nil) }
-            state.setApproval(current, approval.value)
+            // Logins follow Settings; clears a rule set before 1.5.1
+            state.setApproval(current, record.isPassword ? nil : approval.value)
             if !record.isPassword { state.setProxied(current, proxied) }
             if var updated = state.store.record(current) {
                 let changed = updated.group != group.nonEmpty || updated.note != note.nonEmpty || updated.projectFolders != folders
