@@ -26,6 +26,10 @@ final class ScreenshotTests: XCTestCase {
                 MenuBarPanel(close: {}).environment(state)
             }
         }
+        // Dragged taller than its content: the list grows, no gap under it
+        let tall = Demo.state()
+        try Snapshot.png(MenuBarPanel(close: {}).environment(tall), size: NSSize(width: 452, height: 900),
+                         to: out.appendingPathComponent("panel-tall.png"))
         let revealed = Demo.state()
         await revealed.reveal("CLOUDFLARE_API_TOKEN")
         try Snapshot.panel(to: out.appendingPathComponent("panel-revealed.png")) {

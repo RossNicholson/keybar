@@ -11,6 +11,9 @@ struct MenuBarPanel: View {
     /// Rows shown before the list scrolls
     private static let visibleRows = 6
     private static let rowHeight: CGFloat = 52
+    private static let listHeight = CGFloat(visibleRows) * rowHeight + 10
+
+    private var listScrolls: Bool { state.store.active.count > Self.visibleRows }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,7 +26,7 @@ struct MenuBarPanel: View {
                         PillButton(title: "Add a key or password", symbol: "plus") { showingAdd = true }
                     }
                 } else {
-                    if state.store.active.count > Self.visibleRows {
+                    if listScrolls {
                         SearchField(text: $search)
                     }
                     keyList
@@ -32,7 +35,11 @@ struct MenuBarPanel: View {
             }
             .padding(.horizontal, PanelMetrics.inset)
             .padding(.bottom, 12)
-            Spacer(minLength: 0)
+            // A scrolling list grows to fill a panel dragged taller; otherwise
+            // the footer still sits at the bottom
+            if !listScrolls {
+                Spacer(minLength: 0)
+            }
             footer
         }
         .menuBarPanel()
@@ -81,10 +88,12 @@ struct MenuBarPanel: View {
             }
         }
         return Group {
-            if state.store.active.count > Self.visibleRows {
+            if listScrolls {
+                // Six rows when the panel fits its content, and as many as fit
+                // when it's been dragged taller
                 ScrollView { rows }
                     .scrollIndicators(.automatic)
-                    .frame(height: CGFloat(Self.visibleRows) * Self.rowHeight + 10)
+                    .frame(minHeight: Self.listHeight, idealHeight: Self.listHeight, maxHeight: .infinity)
             } else {
                 rows
             }
