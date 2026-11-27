@@ -294,6 +294,16 @@ make screenshots  # renders the UI with demo keys into build/screenshots
 
 Built with SwiftUI and the shared [HouseStyle](https://github.com/RossNicholson/mac-house-style) package, like [BrewDock](https://github.com/RossNicholson/brewdock), [ClawdBar](https://github.com/RossNicholson/clawdbar), [Mop Up](https://github.com/RossNicholson/mop-up), [Repo Radar](https://github.com/RossNicholson/reporadar) and [MacPing](https://github.com/RossNicholson/macping).
 
+## Support
+
+KeyBar is made by [Ross Nicholson](https://rossnicholson.dev). For help, see the [support page](https://rossnicholson.dev/support) or email support@rossnicholson.dev.
+
+If KeyBar keeps your keys out of your chats, you can [buy me a coffee](https://buymeacoffee.com/rossnicholson) ☕
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20Ross-F6E2A4?logo=buy-me-a-coffee&labelColor=232428)](https://buymeacoffee.com/rossnicholson)
+
+---
+
 ## Licence
 
 MIT. KeyBar isn't affiliated with or endorsed by Anthropic. Claude and Claude Code are Anthropic's trademarks.
