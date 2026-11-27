@@ -93,7 +93,7 @@ struct QuickCopyView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
                 Image(systemName: "key.fill").foregroundStyle(AppColors.secondaryText)
-                TextField("Copy a key…", text: $text)
+                TextField("Copy a key or password…", text: $text)
                     .textFieldStyle(.plain)
                     .font(.mono(15))
                     .foregroundStyle(AppColors.text)
@@ -133,7 +133,7 @@ struct QuickCopyView: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 8)
             } else if !text.isEmpty {
-                Text("No keys match \"\(text)\"")
+                Text("Nothing matches \"\(text)\"")
                     .font(.mono(10.5))
                     .foregroundStyle(AppColors.secondaryText)
                     .padding(.horizontal, 14)

@@ -58,7 +58,7 @@ struct Sidebar: View {
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 14)
-        .frame(width: 200)
+        .frame(width: 240)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(AppColors.surface.opacity(0.55))
         .overlay(alignment: .trailing) {
@@ -81,6 +81,7 @@ private struct SidebarRow: View {
                 SymbolTile(symbol: section.symbol, fill: section.tint, size: 26)
                 Text(section.title)
                     .font(.mono(12, weight: selected ? .semibold : .medium))
+                    .lineLimit(1)
                     .foregroundStyle(selected ? AppColors.onSolid : AppColors.text)
                 Spacer(minLength: 0)
                 badge(selected: selected)

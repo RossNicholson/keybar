@@ -12,7 +12,7 @@ struct ClaudeCodeView: View {
         @Bindable var settings = state.settings
         let claude = state.claude
         Screen {
-            ScreenHeader(title: "Claude Code", subtitle: "Let Claude Code use your keys without ever seeing them.")
+            ScreenHeader(title: "Claude Code", subtitle: "Let Claude Code use your keys and passwords without ever seeing them.")
             hero
 
             if let error = claude.lastError { SettingNote(error) }
@@ -69,7 +69,7 @@ struct ClaudeCodeView: View {
             SectionLabel(text: "What it can't stop")
             VStack(alignment: .leading, spacing: 8) {
                 Text("The command itself has the key, so a command could change it before printing it (reverse it, say) or send it somewhere over the network. Hiding it in the output is a safety net, not a sandbox. Claude Code asks you before running commands unless you've told it not to, so read what it wants to run.")
-                Text("To limit the risk, lock keys to the project folders that need them (Keys → edit a key → Limit to a folder), and turn on Settings → Ask before Claude uses a key, so each use needs your Touch ID.")
+                Text("To limit the risk, lock keys to the project folders that need them (Keys and passwords → edit a key → Limit to a folder), and turn on Settings → Ask before Claude uses a key or login, so each use needs your Touch ID.")
             }
             .font(.mono(10.5))
             .foregroundStyle(AppColors.text)
@@ -147,7 +147,7 @@ struct ClaudeCodeView: View {
         let (title, message, fill): (String, String, Color) = {
             switch claude.status {
             case .connected:
-                return ("Connected", "Claude Code can list your keys and use them in commands. New Claude Code sessions pick this up; restart any that are open.", AppColors.mint)
+                return ("Connected", "Claude Code can list your keys and passwords and use them without seeing them. New Claude Code sessions pick this up; restart any that are open.", AppColors.mint)
             case .elsewhere(let path):
                 return ("Connected to another copy", "Claude Code is set up to use \(BridgePolicy.tidy(path)), not this KeyBar. Reconnect to fix it.", AppColors.peach)
             case .disconnected:

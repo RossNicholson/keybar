@@ -14,26 +14,25 @@ struct KeysView: View {
 
     var body: some View {
         Screen {
-            ScreenHeader(title: "Keys", subtitle: subtitle) {
-                HStack(spacing: 8) {
-                    GhostButton(title: "Find keys", symbol: "magnifyingglass") { finding = true }
-                        .fixedSize()
-                    GhostButton(title: "Import .env", symbol: "square.and.arrow.down") { chooseEnvFile() }
-                        .fixedSize()
-                    PillButton(title: "Add key", symbol: "plus") { showingAdd = true }
-                        .fixedSize()
-                }
+            ScreenHeader(title: "Keys and passwords", subtitle: subtitle)
+            HStack(spacing: 8) {
+                PillButton(title: "Add key or password", symbol: "plus") { showingAdd = true }
+                    .fixedSize()
+                GhostButton(title: "Find keys", symbol: "magnifyingglass") { finding = true }
+                    .fixedSize()
+                GhostButton(title: "Import .env", symbol: "square.and.arrow.down") { chooseEnvFile() }
+                    .fixedSize()
             }
             if let importError { SettingNote(importError) }
             if let error = state.store.lastError { SettingNote(error) }
             AttentionCards()
 
             if state.store.active.isEmpty && state.store.archived.isEmpty {
-                MessageCard(title: "No keys yet",
+                MessageCard(title: "No keys or passwords yet",
                             message: "Add your API keys once: Claude, Cloudflare, GitHub, anything. They go in your Mac's Keychain, and Claude Code can use them by name without ever seeing them. Website passwords too: KeyBar signs in with them for Claude, which never sees them. Already have keys in .env files? Find them.",
                             fill: AppColors.butter) {
                     PillButton(title: "Find keys on this Mac", symbol: "magnifyingglass") { finding = true }
-                    GhostButton(title: "Add a key", symbol: "plus") { showingAdd = true }
+                    GhostButton(title: "Add a key or password", symbol: "plus") { showingAdd = true }
                 }
             } else {
                 HStack(spacing: 12) {
@@ -65,7 +64,7 @@ struct KeysView: View {
                 }
                 if records.isEmpty {
                     Text(search.isEmpty ? (showArchived ? "Nothing archived." : "Every key is archived.")
-                                        : "No keys match \"\(search)\".")
+                                        : "Nothing matches \"\(search)\".")
                         .font(.mono(11))
                         .foregroundStyle(AppColors.secondaryText)
                 }

@@ -12,7 +12,7 @@ struct SettingsView: View {
             SectionLabel(text: "Keys")
             SettingToggle(title: "Ask for Touch ID",
                           detail: OwnerCheck.isAvailable
-                            ? "Before showing or copying a key. macOS asks; KeyBar only learns yes or no."
+                            ? "Before showing or copying a key or password. macOS asks; KeyBar only learns yes or no."
                             : "This Mac has no Touch ID or password set up, so keys are shown straight away.",
                           isOn: $settings.requireTouchID)
             SettingCard(title: "Clear the clipboard after", detail: "A copied key is wiped from the clipboard after this, unless you've copied something else since. Clipboard managers are asked to skip it.", below: {
@@ -28,7 +28,7 @@ struct SettingsView: View {
                     AppSettings.approvalLabel($0)
                 }
                 if settings.approvalSeconds == 0 {
-                    SettingNote("Claude can use every key and login without asking you. A key or login set to ask \"Every time\" (Keys → edit) still asks.", isError: false)
+                    SettingNote("Claude can use every key and login without asking you. A key set to ask \"Every time\" (Keys and passwords → edit) still asks.", isError: false)
                 }
             })
 
@@ -45,7 +45,7 @@ struct SettingsView: View {
             SectionLabel(text: "Your other Macs")
             SettingToggle(title: "Sync with iCloud Keychain",
                           detail: state.canSync
-                            ? "Keys, with their groups, notes and folders, go to iCloud Keychain, so KeyBar on each Mac signed in to your Apple Account has them. Apple encrypts them end to end. Needs Passwords & Keychain on in System Settings → Apple Account → iCloud."
+                            ? "Keys and passwords, with their groups, notes and folders, go to iCloud Keychain, so KeyBar on each Mac signed in to your Apple Account has them. Apple encrypts them end to end. Needs Passwords & Keychain on in System Settings → Apple Account → iCloud."
                             : settings.syncWithICloud
                               ? "This copy of KeyBar can't use iCloud Keychain, so it only shows this Mac's keys. Sync stays on for the version from Homebrew or GitHub."
                               : "This copy of KeyBar can't use iCloud Keychain. The version from Homebrew or GitHub can.",
@@ -170,11 +170,11 @@ private struct DangerZone: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             SettingLabel(title: "Delete everything",
-                         detail: "Removes all \(state.store.records.count) keys from your Keychain\(state.store.syncs ? " and from iCloud Keychain, so from all your Macs" : ""), clears the activity log, disconnects Claude Code and other AI apps, and turns off the commit guard. This can't be undone.")
+                         detail: "Removes all \(state.store.records.count) keys and passwords from your Keychain\(state.store.syncs ? " and from iCloud Keychain, so from all your Macs" : ""), clears the activity log, disconnects Claude Code and other AI apps, and turns off the commit guard. This can't be undone.")
             HStack {
-                ConfirmButton(title: "Delete everything", confirmTitle: "Really delete all keys?") {
+                ConfirmButton(title: "Delete everything", confirmTitle: "Really delete them all?") {
                     Task {
-                        guard await OwnerCheck.confirm("delete all your keys", required: state.settings.requireTouchID && !state.isDemo) else { return }
+                        guard await OwnerCheck.confirm("delete all your keys and passwords", required: state.settings.requireTouchID && !state.isDemo) else { return }
                         do {
                             try state.deleteEverything()
                             await state.claude.disconnect()

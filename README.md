@@ -104,7 +104,7 @@ It holds names only, never values, so it's safe to commit. KeyBar looks for the 
 
 ## Find keys on this Mac
 
-Already have keys in `.env` files? **Keys → Find keys** looks through the folders you choose for `.env` files (and `.mcp.json`), plus `export` lines in `~/.zshrc` and friends, the env of MCP servers in `~/.claude.json`, `~/.aws/credentials` and `~/.npmrc`. It skips `node_modules`, builds, hidden folders and example files, and only lists things that look like keys.
+Already have keys in `.env` files? **Keys and passwords → Find keys** looks through the folders you choose for `.env` files (and `.mcp.json`), plus `export` lines in `~/.zshrc` and friends, the env of MCP servers in `~/.claude.json`, `~/.aws/credentials` and `~/.npmrc`. It skips `node_modules`, builds, hidden folders and example files, and only lists things that look like keys.
 
 You tick what to import. The same value found in several projects becomes one key. When two projects use one name for different values, each gets its project's name in front (`SHOP_STRIPE_SECRET_KEY`, `BLOG_STRIPE_SECRET_KEY`), and you can rename them. Values KeyBar already has are marked as such.
 

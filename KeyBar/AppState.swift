@@ -10,7 +10,7 @@ enum AppSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .keys: return "Keys"
+        case .keys: return "Keys and passwords"
         case .activity: return "Activity"
         case .claudeCode: return "Claude Code"
         case .leaks: return "Leak check"
@@ -530,7 +530,7 @@ final class AppState {
     /// (keeping a copy of each on this Mac)
     func setSync(_ on: Bool) async {
         guard on != store.syncs, let live = store.live, canSync, !isMovingKeys else { return }
-        let reason = on ? "move your keys to iCloud Keychain" : "stop syncing your keys with iCloud Keychain"
+        let reason = on ? "move your keys and passwords to iCloud Keychain" : "stop syncing your keys and passwords with iCloud Keychain"
         guard await OwnerCheck.confirm(reason, required: settings.requireTouchID && !isDemo) else { return }
         isMovingKeys = true
         defer { isMovingKeys = false }
@@ -552,7 +552,7 @@ final class AppState {
             }
         } catch {
             syncNote = on
-                ? "Couldn't move your keys: \(error.localizedDescription) Nothing was moved; they're still on this Mac."
+                ? "Couldn't move your keys and passwords: \(error.localizedDescription) Nothing was moved; they're still on this Mac."
                 : "Couldn't finish: \(error.localizedDescription) Nothing was lost; keys are read from both places."
         }
         settings.syncWithICloud = store.syncs

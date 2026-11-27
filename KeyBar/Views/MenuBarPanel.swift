@@ -17,10 +17,10 @@ struct MenuBarPanel: View {
             header
             VStack(spacing: 8) {
                 if state.store.active.isEmpty {
-                    MessageCard(title: "No keys yet",
-                                message: "Add an API key once and Claude Code can use it without ever seeing it.",
+                    MessageCard(title: "No keys or passwords yet",
+                                message: "Add an API key or a website password once and Claude Code can use it without ever seeing it.",
                                 fill: AppColors.butter, compact: true) {
-                        PillButton(title: "Add a key", symbol: "plus") { showingAdd = true }
+                        PillButton(title: "Add a key or password", symbol: "plus") { showingAdd = true }
                     }
                 } else {
                     if state.store.active.count > Self.visibleRows {
@@ -44,7 +44,7 @@ struct MenuBarPanel: View {
         PanelHeader(title: "KeyBar", subtitle: "Keys and logins") {
             Mascot(size: PanelMetrics.mascot)
         } actions: {
-            HeaderIconButton(symbol: "plus", help: "Add a key") { showingAdd.toggle() }
+            HeaderIconButton(symbol: "plus", help: "Add a key or password") { showingAdd.toggle() }
                 .popover(isPresented: $showingAdd, arrowEdge: .bottom) {
                     AddKeyView(compact: true) { showingAdd = false }
                         .environment(state)
@@ -73,7 +73,7 @@ struct MenuBarPanel: View {
                 PanelKeyRow(record: record)
             }
             if records.isEmpty {
-                Text("No keys match \"\(search)\"")
+                Text("Nothing matches \"\(search)\"")
                     .font(.mono(10.5))
                     .foregroundStyle(AppColors.secondaryText)
                     .frame(maxWidth: .infinity)
@@ -109,7 +109,7 @@ struct MenuBarPanel: View {
                         Text(moved ? "Reconnect Claude Code" : "Connect Claude Code")
                             .font(.display(16, relativeTo: .headline))
                             .textCase(.uppercase)
-                        Text(moved ? "KeyBar has moved since you connected it" : "So Claude can use your keys without seeing them")
+                        Text(moved ? "KeyBar has moved since you connected it" : "So Claude can use your keys and passwords without seeing them")
                             .font(.mono(9.5))
                             .opacity(0.75)
                             .fixedSize(horizontal: false, vertical: true)
