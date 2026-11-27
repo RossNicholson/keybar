@@ -53,6 +53,10 @@ struct MenuBarPanel: View {
                 close()
                 state.openWindow?(nil)
             }
+            HeaderIconButton(symbol: "gearshape", help: "Settings") {
+                close()
+                state.openWindow?(.settings)
+            }
             HeaderIconButton(symbol: "info", help: "About & help") { showingAbout.toggle() }
                 .popover(isPresented: $showingAbout, arrowEdge: .bottom) {
                     AboutPopover(app: .keyBar, hidingInstalledApps: !state.isDemo) { Mascot(size: 56) }
