@@ -75,9 +75,18 @@ struct MenuBarPanel: View {
 
     private var keyList: some View {
         let records = state.store.search(search)
-        let rows = VStack(spacing: 6) {
-            ForEach(records) { record in
-                PanelKeyRow(record: record)
+        // Grouped as in the window: by group, else by service, else Passwords
+        let groups = Dictionary(grouping: records, by: \.displayGroup)
+        let names = groups.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        let rows = VStack(spacing: 12) {
+            ForEach(names, id: \.self) { group in
+                VStack(alignment: .leading, spacing: 6) {
+                    SectionLabel(text: group)
+                        .padding(.leading, 2)
+                    ForEach(groups[group] ?? []) { record in
+                        PanelKeyRow(record: record)
+                    }
+                }
             }
             if records.isEmpty {
                 Text("Nothing matches \"\(search)\"")
