@@ -7,3 +7,7 @@ DerivedData/
 *.dSYM.zip
 *.dSYM
 # ExportOptions.plist is committed — CI needs it (no secrets in it)
+
+# Notes for Claude Code: kept on this Mac only, never in the public repo
+CLAUDE.md
+CLAUDE.local.md
